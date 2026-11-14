@@ -26,6 +26,7 @@ sealed class Appearance
     public int MetricSpacing { get; set; }
     public int FramePadding { get; set; }
     public bool Vertical { get; set; }
+    public bool ValueBesideName { get; set; }
     public int OpenIconColor { get; set; }
 
     public Appearance()
@@ -228,7 +229,7 @@ sealed class Options : Form
         typeface.SelectedIndexChanged += delegate { preview.Invalidate(); };
         if (doorStyle != null)
         {
-            Text = (doorEditor.Cover ? HeatingWidget.CoverTitle : doorEditor.Heating ? HeatingWidget.Title : doorEditor.Switches ? DoorWidget.SwitchTitle : DoorWidget.DoorTitle) + " – Einstellungen";
+            Text = (doorEditor.Sensors ? DoorWidget.SensorTitle : doorEditor.Cover ? HeatingWidget.CoverTitle : doorEditor.Heating ? HeatingWidget.Title : doorEditor.Switches ? DoorWidget.SwitchTitle : DoorWidget.DoorTitle) + " – Einstellungen";
             ClientSize = new Size(1090, 554);
             design.Height = 318;
             connection.Width = 661;
@@ -239,26 +240,32 @@ sealed class Options : Form
             reset.Top = 512;
             versionLabel.Top = 518;
             foreach (var control in connection.Controls.Cast<Control>().ToArray()) control.Dispose();
-            connection.Text = doorEditor.Cover ? HeatingWidget.CoverTitle : doorEditor.Heating ? "Thermostate" : doorEditor.Switches ? "Schalter und Sensoren" : DoorWidget.DoorTitle;
+            connection.Text = doorEditor.Sensors ? DoorWidget.SensorTitle : doorEditor.Cover ? HeatingWidget.CoverTitle : doorEditor.Heating ? "Thermostate" : doorEditor.Switches ? "Schalter und Sensoren" : DoorWidget.DoorTitle;
             doorEditor.Bounds = new Rectangle(8, 22, 645, 220);
             connection.Controls.Add(doorEditor);
             var sample = AddColor(doorEditor.Switches ? "Icon-Farbe bei Ein" : "Icon-Farbe bei offener Tür", appearance.OpenIconColor, 247, connection);
             var showOpen = new CheckBox { Text = doorEditor.Switches ? "Ein-Zustand in Vorschau anzeigen" : "Offene Kontakte in Vorschau anzeigen", AutoSize = true,
                 Location = new Point(doorEditor.Switches ? 160 : 16, 284) };
             connection.Controls.Add(showOpen);
-            if (doorEditor.DeviceRows) { showOpen.Hide(); sample.Hide(); connection.Controls[connection.Controls.IndexOf(sample) - 1].Hide(); }
+            if (doorEditor.DeviceRows || doorEditor.Sensors) { showOpen.Hide(); sample.Hide(); connection.Controls[connection.Controls.IndexOf(sample) - 1].Hide(); }
             var vertical = new CheckBox { Text = "Untereinander", AutoSize = true,
                 Location = new Point(16, 284), Checked = appearance.Vertical };
-            if (doorEditor.Switches) connection.Controls.Add(vertical);
+            if (doorEditor.Switches || doorEditor.Sensors) connection.Controls.Add(vertical);
             vertical.CheckedChanged += delegate { preview.Invalidate(); };
+            var beside = new CheckBox { Text = "Wert neben Bezeichnung", AutoSize = true,
+                Location = new Point(150, 284), Checked = appearance.ValueBesideName };
+            if (doorEditor.Sensors) connection.Controls.Add(beside);
+            beside.CheckedChanged += delegate { preview.Invalidate(); };
+            reset.Click += delegate { beside.Checked = false; };
             reset.Click += delegate { vertical.Checked = false; };
             AddCopyMenu(connection, new Point(420, 278),
-                doorEditor.Cover ? HeatingWidget.CoverTitle : doorEditor.Heating ? HeatingWidget.Title : doorEditor.Switches ? DoorWidget.SwitchTitle : DoorWidget.DoorTitle,
+                doorEditor.Sensors ? DoorWidget.SensorTitle : doorEditor.Cover ? HeatingWidget.CoverTitle : doorEditor.Heating ? HeatingWidget.Title : doorEditor.Switches ? DoorWidget.SwitchTitle : DoorWidget.DoorTitle,
                 solarStyle, source =>
                 {
                     ApplyStyle(source);
                     sample.BackColor = Color.FromArgb(source.OpenIconColor);
                     vertical.Checked = source.Vertical;
+                    beside.Checked = source.ValueBesideName;
                 });
             reset.Click += delegate { sample.BackColor = Color.FromArgb(new Appearance().OpenIconColor); };
             preview.Tile = scale =>
@@ -266,7 +273,16 @@ sealed class Options : Form
                 var style = ReadAppearance();
                 style.OpenIconColor = sample.BackColor.ToArgb();
                 style.Vertical = vertical.Checked;
+                style.ValueBesideName = doorEditor.Sensors && beside.Checked;
                 var rows = doorEditor.ReadRows();
+                if (doorEditor.Sensors)
+                {
+                    if (rows.Length == 0) rows = new[] { new Door { Name = "Außentemperatur", IconKind = "Temperatur" } };
+                    var examples = rows.Select(row => DoorWidget.SensorValue(new SolarTile.Sensor {
+                        state = "21.357", attributes = new SolarTile.SensorAttributes { unit_of_measurement = row.IconKind == "Temperatur" ? "°C" : row.IconKind == "Luftfeuchtigkeit" ? "%" : "" }
+                    }, row.Decimals, row.Unit)).ToArray();
+                    return DoorWidget.PaintSensors(style, rows, rows.Select(row => row.Name).ToArray(), examples, scale, 0);
+                }
                 if (doorEditor.DeviceRows) return HeatingWidget.Preview(style, rows, scale, doorEditor.Cover);
                 if (rows.Length == 0) rows = new[] { doorEditor.Switches
                     ? new Door { Name = "Lampe", Open = "Ein", Closed = "Aus", IconKind = "Schalter" }
@@ -284,6 +300,7 @@ sealed class Options : Form
                 SelectedAppearance = ReadAppearance();
                 SelectedAppearance.OpenIconColor = sample.BackColor.ToArgb();
                 SelectedAppearance.Vertical = vertical.Checked;
+                SelectedAppearance.ValueBesideName = doorEditor.Sensors && beside.Checked;
                 DialogResult = DialogResult.OK;
             };
         }
@@ -323,6 +340,15 @@ sealed class Options : Form
                 apply(saved ?? (source == HeatingWidget.Title
                     ? new Appearance { IconSize = 28, MetricSpacing = 0, FramePadding = 10 }
                     : new Appearance()));
+            });
+        }
+        foreach (var widget in DoorWidget.SensorWidgets())
+        {
+            var id = widget.Key;
+            menu.Items.Add("Sensoren · " + widget.Value, null, delegate
+            {
+                var saved = DoorWidget.SensorStyle(id);
+                if (saved != null) apply(saved);
             });
         }
         button.Click += delegate { menu.Show(button, 0, button.Height); };
@@ -595,7 +621,7 @@ sealed class Options : Form
             DwmSetWindowAttribute(Handle, 20, ref dark, sizeof(int));
 
             var matches = (sensors ?? new SolarTile.Sensor[0]).Where(sensor => sensor != null &&
-                sensor.entity_id != null && sensor.attributes != null && (unit == "window_cover"
+                sensor.entity_id != null && sensor.attributes != null && (unit == "any_sensor" ? DoorWidget.IsSensor(sensor.entity_id) : unit == "window_cover"
                     ? HeatingWidget.IsCover(sensor.entity_id) && !new[] { "garage", "door", "gate" }.Contains(sensor.attributes.device_class)
                     : unit == "climate" ? HeatingWidget.IsClimate(sensor.entity_id) : unit == "switch" ? DoorWidget.IsSwitchEntity(sensor.entity_id) : unit == null
                     ? (sensor.entity_id.StartsWith("binary_sensor.", StringComparison.Ordinal) &&
@@ -696,6 +722,8 @@ sealed class SolarTile : Form
     DoorWidget switches;
     HeatingWidget heating;
     HeatingWidget covers;
+    readonly System.Collections.Generic.Dictionary<string, DoorWidget> sensors = new System.Collections.Generic.Dictionary<string, DoorWidget>();
+    ToolStripMenuItem sensorMenu;
     HomeAssistantEvents liveEvents;
     readonly object liveLock = new object();
     readonly System.Collections.Generic.HashSet<string> liveChanges = new System.Collections.Generic.HashSet<string>();
@@ -739,7 +767,7 @@ sealed class SolarTile : Form
             timer.Tick += async delegate { await RefreshValues(); };
         }
         var pin = new ToolStripMenuItem("Immer im Vordergrund") { CheckOnClick = true };
-        pin.CheckedChanged += delegate { TopMost = pin.Checked; if (doors != null) doors.TopMost = TopMost; if (switches != null) switches.TopMost = TopMost; if (heating != null) heating.TopMost = TopMost; if (covers != null) covers.TopMost = TopMost; };
+        pin.CheckedChanged += delegate { TopMost = pin.Checked; if (doors != null) doors.TopMost = TopMost; if (switches != null) switches.TopMost = TopMost; if (heating != null) heating.TopMost = TopMost; if (covers != null) covers.TopMost = TopMost; foreach (var widget in sensors.Values) widget.TopMost = TopMost; };
         menu.Items.Add(pin);
         menu.Items.Add("Schließen", null, delegate
         {
@@ -762,6 +790,10 @@ sealed class SolarTile : Form
             addWidget.DropDownItems.Add(DoorWidget.SwitchTitle, null, delegate { ShowDoors(switchWidget: true); });
             addWidget.DropDownItems.Add(HeatingWidget.Title, null, delegate { ShowHeating(); });
             addWidget.DropDownItems.Add(HeatingWidget.CoverTitle, null, delegate { ShowHeating(cover: true); });
+            sensorMenu = new ToolStripMenuItem(DoorWidget.SensorTitle);
+            addWidget.DropDownItems.Add(sensorMenu);
+            sensorMenu.DropDownOpening += delegate { PopulateSensorMenu(); };
+            PopulateSensorMenu();
             trayMenu.Items.Add(addWidget);
             trayMenu.Items.Add("Einstellungen", null, delegate { Configure(); });
             trayMenu.Items.Add("Programm beenden", null, delegate { ExitWidgets(); });
@@ -797,6 +829,8 @@ sealed class SolarTile : Form
         if (active.Contains("switches")) ShowDoors(remember: false, switchWidget: true);
         if (active.Contains("heating")) ShowHeating(false);
         if (active.Contains("covers")) ShowHeating(false, cover: true);
+        foreach (var id in active.Where(line => line.StartsWith("sensor:", StringComparison.Ordinal)).Select(line => line.Substring(7)).Distinct())
+            if (DoorWidget.IsSensorId(id) && DoorWidget.SensorWidgets().ContainsKey(id)) OpenSensor(id, false);
     }
 
     void StartLive()
@@ -838,6 +872,7 @@ sealed class SolarTile : Form
             if (switches != null) tasks.Add(switches.RefreshLive(changes));
             if (heating != null) tasks.Add(heating.RefreshLive(changes));
             if (covers != null) tasks.Add(covers.RefreshLive(changes));
+            foreach (var widget in sensors.Values) tasks.Add(widget.RefreshLive(changes));
             await Task.WhenAll(tasks);
         }
         finally { if (!exiting && !IsDisposed) liveTimer.Start(); }
@@ -852,7 +887,8 @@ sealed class SolarTile : Form
             string temp = WidgetsFile + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
-                File.WriteAllLines(temp, new[] { Visible ? "solar" : "", doors != null && doors.Visible ? "doors" : "", switches != null && switches.Visible ? "switches" : "", heating != null && heating.Visible ? "heating" : "", covers != null && covers.Visible ? "covers" : "" });
+                File.WriteAllLines(temp, new[] { Visible ? "solar" : "", doors != null && doors.Visible ? "doors" : "", switches != null && switches.Visible ? "switches" : "", heating != null && heating.Visible ? "heating" : "", covers != null && covers.Visible ? "covers" : "" }
+                    .Concat(sensors.Where(pair => pair.Value.Visible).Select(pair => "sensor:" + pair.Key)));
                 if (File.Exists(WidgetsFile)) File.Replace(temp, WidgetsFile, null);
                 else File.Move(temp, WidgetsFile);
             }
@@ -860,6 +896,34 @@ sealed class SolarTile : Form
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
+    }
+
+    void PopulateSensorMenu()
+    {
+        foreach (ToolStripItem item in sensorMenu.DropDownItems.Cast<ToolStripItem>().ToArray()) item.Dispose();
+        sensorMenu.DropDownItems.Add("Neue Sensor-Kachel…", null, delegate { OpenSensor(Guid.NewGuid().ToString("N")); });
+        foreach (var widget in DoorWidget.SensorWidgets().OrderBy(pair => pair.Value))
+        {
+            string id = widget.Key;
+            sensorMenu.DropDownItems.Add(widget.Value, null, delegate { OpenSensor(id); });
+        }
+        foreach (ToolStripItem item in sensorMenu.DropDownItems) item.ForeColor = Color.WhiteSmoke;
+    }
+
+    void OpenSensor(string id, bool remember = true)
+    {
+        if (settings == null && !Configure()) return;
+        DoorWidget widget;
+        if (!sensors.TryGetValue(id, out widget))
+        {
+            widget = new DoorWidget(() => settings, TopMost, sensorId: id);
+            sensors.Add(id, widget);
+            widget.FormClosed += delegate { sensors.Remove(id); RememberWidgets(); };
+            widget.VisibleChanged += delegate { if (!widget.Visible) RememberWidgets(); };
+        }
+        widget.Show();
+        widget.Activate();
+        if (remember) RememberWidgets();
     }
 
     void OpenSolar()
@@ -928,6 +992,7 @@ sealed class SolarTile : Form
         if (switches != null) switches.Close();
         if (heating != null) heating.Close();
         if (covers != null) covers.Close();
+        foreach (var widget in sensors.Values.ToArray()) widget.Close();
         Close();
         Application.ExitThread();
     }
@@ -939,6 +1004,7 @@ sealed class SolarTile : Form
         if (switches != null) switches.Close();
         if (heating != null) heating.Close();
         if (covers != null) covers.Close();
+        foreach (var widget in sensors.Values.ToArray()) widget.Close();
         if (!demo) Application.ExitThread();
         base.OnFormClosing(args);
     }
@@ -995,7 +1061,7 @@ sealed class SolarTile : Form
 
     internal static Bitmap PaintTile(Appearance appearance, string[] values, float scale,
         int minimumAlpha, float[] metricStarts, string[] captions = null, Action<Graphics, int> drawIcon = null,
-        bool namesOnly = false, RectangleF[] iconBounds = null)
+        bool namesOnly = false, RectangleF[] iconBounds = null, bool valueBesideName = false)
     {
         captions = captions ?? Captions;
         var size = Math.Max(8, Math.Min(28, appearance.TextSize));
@@ -1012,14 +1078,16 @@ sealed class SolarTile : Form
         using (var labelFont = CreateTileFont(appearance.Typeface, Math.Max(7, size - 1) * scale, FontStyle.Regular))
         using (var valueFont = CreateTileFont(appearance.Typeface, size * scale, FontStyle.Bold))
         {
-            textHeight = namesOnly ? valueFont.GetHeight(measure) : labelFont.GetHeight(measure) + valueFont.GetHeight(measure) + 2 * scale;
+            textHeight = namesOnly || valueBesideName ? valueFont.GetHeight(measure) : labelFont.GetHeight(measure) + valueFont.GetHeight(measure) + 2 * scale;
             measure.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
             for (int i = 0; i < values.Length; i++)
             {
                 metricStarts[i] = right;
                 float captionWidth = measure.MeasureString(captions[i], namesOnly ? valueFont : labelFont, int.MaxValue, StringFormat.GenericTypographic).Width;
                 float valueWidth = measure.MeasureString(values[i], valueFont, int.MaxValue, StringFormat.GenericTypographic).Width;
-                float itemWidth = icon + iconTextGap + (float)Math.Ceiling(Math.Max(captionWidth, namesOnly ? 0 : valueWidth)) + 2 * scale;
+                float textWidth = valueBesideName ? captionWidth + 8 * scale + valueWidth
+                    : Math.Max(captionWidth, namesOnly ? 0 : valueWidth);
+                float itemWidth = icon + iconTextGap + (float)Math.Ceiling(textWidth) + 2 * scale;
                 widest = Math.Max(widest, itemWidth);
                 right += itemWidth + gap;
             }
@@ -1050,7 +1118,7 @@ sealed class SolarTile : Form
                 g.FillPath(fill, shape);
                 var labelHeight = labelFont.GetHeight(g);
                 var valueHeight = valueFont.GetHeight(g);
-                float block = namesOnly ? valueHeight : labelHeight + valueHeight + 2 * scale;
+                float block = namesOnly || valueBesideName ? valueHeight : labelHeight + valueHeight + 2 * scale;
                 for (int i = 0; i < values.Length; i++)
                 {
                     float left = appearance.Vertical ? inset : metricStarts[i];
@@ -1073,7 +1141,13 @@ sealed class SolarTile : Form
                             ? System.Drawing.Text.TextRenderingHint.SingleBitPerPixelGridFit
                             : System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
                     g.DrawString(captions[i], namesOnly ? valueFont : labelFont, text, textLeft, (float)Math.Round(top), StringFormat.GenericTypographic);
-                    if (!namesOnly) g.DrawString(values[i], valueFont, text, textLeft, (float)Math.Round(top + labelHeight + 2 * scale),
+                    if (valueBesideName)
+                    {
+                        float captionWidth = g.MeasureString(captions[i], labelFont, int.MaxValue, StringFormat.GenericTypographic).Width;
+                        g.DrawString(values[i], valueFont, text, (float)Math.Round(textLeft + captionWidth + 8 * scale),
+                            (float)Math.Round(top), StringFormat.GenericTypographic);
+                    }
+                    else if (!namesOnly) g.DrawString(values[i], valueFont, text, textLeft, (float)Math.Round(top + labelHeight + 2 * scale),
                         StringFormat.GenericTypographic);
                     g.PixelOffsetMode = PixelOffsetMode.HighQuality;
                 }
@@ -1376,7 +1450,15 @@ sealed class SolarTile : Form
                 }
                 finally { File.Delete(heatPosition); }
                 if (HeatingWidget.InvertCoverPosition(20) != 80 || HeatingWidget.InvertCoverPosition(80) != 20) return 1;
+                var sensorReading = new Sensor { state = "21.357", attributes = new SolarTile.SensorAttributes { unit_of_measurement = "°C" } };
+                if (!DoorWidget.IsSensor("sensor.temperatur") || DoorWidget.IsSensor("switch.test") ||
+                    DoorWidget.SensorValue(sensorReading, 1) != 21.4m.ToString("F1", CultureInfo.CurrentCulture) + " °C") return 1;
                 var heatStyle = new Appearance();
+                using (var sensorOptions = new Options(null, new string[0], heatStyle, heatStyle,
+                    new DoorWidget.DoorEditor(new Door[0], () => null, sensors: true))) { }
+                using (var sensorPreview = DoorWidget.PaintSensors(new Appearance { Vertical = true }, new Door[0],
+                    new[] { "Temperatur", "Luftfeuchte" }, new[] { "21 °C", "50 %" }, 1, 0))
+                    if (sensorPreview.Height < 88) return 1;
                 using (var coverOptions = new Options(null, new string[0], heatStyle, heatStyle,
                     new DoorWidget.DoorEditor(new Door[0], () => null, cover: true))) { }
                 using (var coverPreview = HeatingWidget.Preview(heatStyle, new Door[0], 1, true))

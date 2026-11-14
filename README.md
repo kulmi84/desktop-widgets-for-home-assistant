@@ -10,6 +10,8 @@ Unabhängige Windows-App für Home Assistant. Die Widgets liegen frei positionie
 
 - **Rollläden** öffnen und schließen per Pfeiltaste. Die Zahl in der Mitte zeigt den Schließgrad. Bei Geräten mit Positionsvorgabe lässt sich dort direkt ein Wert von 0 bis 100 eingeben und mit Enter bestätigen.
 
+- **Sensoren** lassen sich in mehreren frei benennbaren Kacheln kombinieren. Pro Sensor können Name, Icon, Einheit und Dezimalstellen eingestellt werden. Die Werte lassen sich unter oder neben der Bezeichnung anzeigen.
+
 Sensoren lassen sich aus Home Assistant auswählen. Die Widgets bieten eine Live-Vorschau für Schrift, Farben, Transparenz, Symbolgröße und Abstände. Namen, Reihenfolge und Positionen werden lokal gespeichert.
 
 ## Screenshots
@@ -27,6 +29,8 @@ Alle Anzeigen verwenden Beispieldaten.
 ![Heizungs-Widget mit Isttemperatur und Plus- und Minus-Tasten](docs/screenshots/04-heizung.png)
 
 ![Rollladen-Widget mit Hoch- und Runter-Tasten sowie Schließgrad](docs/screenshots/05-rolllaeden.png)
+
+![Sensor-Kachel mit Außentemperatur und Luftfeuchtigkeit](docs/screenshots/06-sensoren.png)
 
 ## Bauen und starten
 

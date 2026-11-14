@@ -14,6 +14,8 @@ sealed class Door
 {
     public string Entity { get; set; }
     public string IconKind { get; set; }
+    public int? Decimals { get; set; }
+    public string Unit { get; set; }
 
     internal string ResolvedIcon
     {
@@ -55,6 +57,7 @@ sealed class DoorPosition
 
 sealed class DoorSettings
 {
+    public string Name { get; set; }
     public Door[] Doors { get; set; }
     public DoorPosition Position { get; set; }
     public Appearance Appearance { get; set; }
@@ -68,6 +71,50 @@ sealed class DoorWidget : Form
     internal const string SwitchTitle = "Schalter";
     readonly string configPath;
     readonly bool switches;
+    readonly string sensorId;
+    bool IsSensorWidget { get { return sensorId != null; } }
+    internal const string SensorTitle = "Sensoren";
+    internal string WidgetName { get { return config.Name ?? SensorTitle; } }
+
+    static string SensorFolder
+    {
+        get { return Path.Combine(Path.GetDirectoryName(ConfigPath(false)), "sensor-widgets"); }
+    }
+
+    internal static bool IsSensorId(string id)
+    {
+        Guid value;
+        return Guid.TryParseExact(id, "N", out value);
+    }
+
+    internal static System.Collections.Generic.Dictionary<string, string> SensorWidgets()
+    {
+        var result = new System.Collections.Generic.Dictionary<string, string>();
+        if (!Directory.Exists(SensorFolder)) return result;
+        foreach (string file in Directory.GetFiles(SensorFolder, "*.json"))
+        {
+            string id = Path.GetFileNameWithoutExtension(file);
+            if (!IsSensorId(id)) continue;
+            try
+            {
+                var saved = new JavaScriptSerializer().Deserialize<DoorSettings>(File.ReadAllText(file));
+                if (saved != null) result[id] = saved.Name ?? SensorTitle;
+            }
+            catch (Exception) { }
+        }
+        return result;
+    }
+
+    internal static Appearance SensorStyle(string id)
+    {
+        if (!IsSensorId(id)) return null;
+        try
+        {
+            return new JavaScriptSerializer().Deserialize<DoorSettings>(
+                File.ReadAllText(Path.Combine(SensorFolder, id + ".json"))).Appearance;
+        }
+        catch (Exception) { return null; }
+    }
     internal static string ConfigPath(bool switches)
     {
         return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -117,11 +164,12 @@ sealed class DoorWidget : Form
         catch (Exception) { return false; }
     }
 
-    internal DoorWidget(Func<Settings> connection, bool topMost, bool switches = false)
+    internal DoorWidget(Func<Settings> connection, bool topMost, bool switches = false, string sensorId = null)
     {
         this.connection = connection;
         this.switches = switches;
-        configPath = ConfigPath(switches);
+        this.sensorId = sensorId;
+        configPath = IsSensorWidget ? Path.Combine(SensorFolder, sensorId + ".json") : ConfigPath(switches);
         Text = switches ? SwitchTitle : DoorTitle;
         Icon = WidgetIcon.Load();
         Font = new Font("Segoe UI", 10);
@@ -249,9 +297,9 @@ sealed class DoorWidget : Form
         if (!IsDisposed) await RefreshDoors();
     }
 
-    void Save(Door[] doors, Appearance appearance)
+    void Save(Door[] doors, Appearance appearance, string name = null)
     {
-        var next = new DoorSettings { Doors = doors, Position = new DoorPosition { X = Left, Y = Top }, Appearance = appearance };
+        var next = new DoorSettings { Name = name ?? config.Name, Doors = doors, Position = new DoorPosition { X = Left, Y = Top }, Appearance = appearance };
         Directory.CreateDirectory(Path.GetDirectoryName(configPath));
         string temp = configPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
@@ -267,15 +315,19 @@ sealed class DoorWidget : Form
     async void EditDoors()
     {
         var settings = connection();
-        var editor = new DoorEditor(config.Doors, connection, switches);
+        var editor = new DoorEditor(config.Doors, connection, switches, sensors: IsSensorWidget, widgetName: WidgetName);
         using (var dialog = new Options(settings, new string[0], config.Appearance ?? new Appearance(),
             settings == null ? null : settings.Appearance, editor))
         {
-            if (dialog.ShowDialog(this) != DialogResult.OK) return;
-            try { Save(editor.Doors, dialog.SelectedAppearance); }
+            if (dialog.ShowDialog(this) != DialogResult.OK)
+            {
+                if (IsSensorWidget && config.Doors.Length == 0) Close();
+                return;
+            }
+            try { Save(editor.Doors, dialog.SelectedAppearance, IsSensorWidget ? editor.WidgetName : null); }
             catch (Exception)
             {
-                MessageBox.Show(this, "Die Türen konnten nicht gespeichert werden.", Text);
+                MessageBox.Show(this, "Die Einstellungen konnten nicht gespeichert werden.", Text);
                 return;
             }
         }
@@ -297,20 +349,22 @@ sealed class DoorWidget : Form
     {
         lastStates = states;
         switchBounds = new RectangleF[switches ? Math.Max(1, doors.Length) : 0];
-        var names = doors.Length == 0 ? new[] { switches ? SwitchTitle : DoorTitle } : doors.Select(door => door.Name).ToArray();
+        var names = doors.Length == 0 ? new[] { IsSensorWidget ? WidgetName : switches ? SwitchTitle : DoorTitle } : doors.Select(door => door.Name).ToArray();
         var values = doors.Length == 0 ? new[] { switches ? "Schalter hinzufügen" : "Sensoren hinzufügen" } : doors.Select((door, index) =>
-            states == null ? "—" : door.Describe(states[index])).ToArray();
+            states == null ? "—" : IsSensorWidget ? states[index] ?? "—" : door.Describe(states[index])).ToArray();
         var opened = doors.Select((door, index) => states != null &&
             (states[index] == "on" || states[index] == "open" || states[index] == "opening")).ToArray();
         if (opened.Length == 0) opened = new bool[1];
         if (switches && doors.Length == 0) doors = new[] { new Door { IconKind = "Schalter" } };
         float scale = LayeredTile.ScaleFor(this);
-        using (var bitmap = PaintDoors(config.Appearance ?? new Appearance(), names, values, opened, scale, 1, doors, switches ? switchBounds : null))
+        using (var bitmap = IsSensorWidget
+            ? PaintSensors(config.Appearance ?? new Appearance(), doors, names, values, scale, 1)
+            : PaintDoors(config.Appearance ?? new Appearance(), names, values, opened, scale, 1, doors, switches ? switchBounds : null))
         {
             if (ClientSize != bitmap.Size) ClientSize = bitmap.Size;
             LayeredTile.Present(Handle, bitmap);
         }
-        AccessibleName = Text = (switches ? SwitchTitle : DoorTitle) + ": " + string.Join(", ", names.Zip(values, (name, state) => name + " " + state));
+        AccessibleName = Text = (IsSensorWidget ? WidgetName : switches ? SwitchTitle : DoorTitle) + ": " + string.Join(", ", names.Zip(values, (name, state) => name + " " + state));
     }
 
     internal static Bitmap PaintDoors(Appearance style, string[] names, string[] values, bool[] opened, float scale, int alpha, Door[] doors = null, RectangleF[] bounds = null)
@@ -321,6 +375,62 @@ sealed class DoorWidget : Form
             string kind = doors != null && index < doors.Length ? doors[index].ResolvedIcon : "Tür";
             DoorIcons.Draw(graphics, kind, opened[index], color);
         }, doors != null && doors.Length > 0 && doors[0].IconKind == "Schalter", bounds);
+    }
+
+    internal static Bitmap PaintSensors(Appearance style, Door[] sensors, string[] captions, string[] values, float scale, int alpha)
+    {
+        return SolarTile.PaintTile(style, values, scale, alpha, new float[captions.Length], captions, (g, i) =>
+        {
+            string icon = i < sensors.Length ? sensors[i].IconKind : null;
+            Color color = Color.FromArgb(style.Icons);
+            switch (icon)
+            {
+                case "Solar": SolarIcon.Draw(g, 0, color); break;
+                case "Akku": SolarIcon.Draw(g, 1, color); break;
+                case "Haus": SolarIcon.Draw(g, 2, color); break;
+                case "Strom": SolarIcon.Draw(g, 3, color); break;
+                case "Luftfeuchtigkeit":
+                    using (var drop = new GraphicsPath())
+                    using (var pen = new Pen(color, 2f) { LineJoin = LineJoin.Round })
+                    {
+                        drop.AddBezier(16, 3, 13, 9, 7, 13, 7, 20);
+                        drop.AddBezier(7, 20, 7, 31, 25, 31, 25, 20);
+                        drop.AddBezier(25, 20, 25, 13, 19, 9, 16, 3);
+                        drop.CloseFigure();
+                        g.DrawPath(pen, drop);
+                    }
+                    break;
+                case "Temperatur": DoorIcons.DrawHeatWave(g, color); break;
+                default:
+                    using (var pen = new Pen(color, 2))
+                    {
+                        g.DrawEllipse(pen, 5, 5, 22, 22);
+                        g.DrawLine(pen, 16, 16, 22, 10);
+                    }
+                    break;
+            }
+        }, valueBesideName: style.ValueBesideName);
+    }
+
+    internal static bool IsSensor(string entity)
+    {
+        return entity != null && Regex.IsMatch(entity, @"^(sensor|binary_sensor)\.[a-z0-9_]+$");
+    }
+
+    internal static string SensorValue(SolarTile.Sensor state, int? decimals, string unitOverride = null)
+    {
+        if (state == null || string.IsNullOrWhiteSpace(state.state) ||
+            state.state == "unknown" || state.state == "unavailable") return "—";
+        decimal value;
+        string output = state.state;
+        if (decimal.TryParse(output, System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out value))
+            output = value.ToString(decimals.HasValue ? "F" + decimals.Value : "0.############################",
+                System.Globalization.CultureInfo.CurrentCulture);
+        else if (output == "on" || output == "off") output = output == "on" ? "Ein" : "Aus";
+        var unit = string.IsNullOrWhiteSpace(unitOverride)
+            ? (state.attributes == null ? null : state.attributes.unit_of_measurement) : unitOverride;
+        return string.IsNullOrWhiteSpace(unit) ? output : output + " " + unit;
     }
 
     bool refreshQueued;
@@ -369,7 +479,7 @@ sealed class DoorWidget : Form
                 {
                     if (!response.IsSuccessStatusCode) return null;
                     var state = new JavaScriptSerializer().Deserialize<SolarTile.Sensor>(await response.Content.ReadAsStringAsync());
-                    return state == null ? null : state.state;
+                    return IsSensorWidget ? SensorValue(state, door.Decimals, door.Unit) : state == null ? null : state.state;
                 }
             }
         }
@@ -386,11 +496,15 @@ sealed class DoorWidget : Form
         internal readonly bool Switches;
         internal readonly bool Heating;
         internal readonly bool Cover;
+        internal readonly bool Sensors;
+        readonly TextBox widgetNameInput = new TextBox();
+        internal string WidgetName { get { return widgetNameInput.Text.Trim(); } }
         internal bool DeviceRows { get { return Heating || Cover; } }
-        internal DoorEditor(Door[] doors, Func<Settings> connection, bool switches = false, bool heating = false, bool cover = false)
+        internal DoorEditor(Door[] doors, Func<Settings> connection, bool switches = false, bool heating = false, bool cover = false, bool sensors = false, string widgetName = null)
         {
             Heating = heating;
             Cover = cover;
+            Sensors = sensors;
             this.connection = connection;
             Switches = switches;
             Font = new Font("Segoe UI", 10);
@@ -437,10 +551,29 @@ sealed class DoorWidget : Form
                     picker.DroppedDown = true;
                 }
             };
+            if (Sensors)
+            {
+                grid.Columns[2].HeaderText = "Dezimalstellen";
+                grid.Columns[3].HeaderText = "Einheit";
+                grid.Columns[3].FillWeight = 60;
+
+                icons.Items.Clear();
+                icons.Items.AddRange("Messwert", "Temperatur", "Luftfeuchtigkeit", "Solar", "Akku", "Haus", "Strom");
+                widgetNameInput.Text = widgetName ?? SensorTitle;
+                widgetNameInput.Bounds = new Rectangle(80, 0, 564, 24);
+                widgetNameInput.BackColor = Input;
+                widgetNameInput.ForeColor = ForeColor;
+                widgetNameInput.MaxLength = 60;
+                widgetNameInput.AccessibleName = "Widget-Name";
+                Controls.Add(new Label { Text = "Name", Bounds = new Rectangle(0, 3, 72, 22) });
+                Controls.Add(widgetNameInput);
+                grid.Top = 29;
+                grid.Height -= 29;
+            }
             if (DeviceRows) { grid.Columns[2].Visible = false; grid.Columns[3].Visible = false; icons.Visible = false; }
             foreach (DataGridViewColumn column in grid.Columns) column.SortMode = DataGridViewColumnSortMode.NotSortable;
             foreach (var door in doors)
-                grid.Rows.Add(door.Entity, door.Name, door.Open, door.Closed, switches ? "Schalter" : door.IconKind ?? "Automatisch");
+                grid.Rows.Add(door.Entity, door.Name, Sensors ? door.Decimals.ToString() : door.Open, Sensors ? door.Unit : door.Closed, Sensors ? door.IconKind ?? "Messwert" : switches ? "Schalter" : door.IconKind ?? "Automatisch");
 
             var add = Button("Sensor auswählen…", 0, 151);
             var manual = Button("Manuell hinzufügen", 157, 150);
@@ -448,7 +581,7 @@ sealed class DoorWidget : Form
             var up = Button(DeviceRows ? "↑ Nach oben" : "↑ Nach links", 405, 109);
             var down = Button(DeviceRows ? "↓ Nach unten" : "↓ Nach rechts", 520, 124);
             add.Click += async delegate { await SelectDoor(add); };
-            manual.Click += delegate { grid.Rows.Add("", "", Switches ? "Ein" : "Offen", Switches ? "Aus" : "Geschlossen", Switches ? "Schalter" : "Automatisch"); };
+            manual.Click += delegate { grid.Rows.Add("", "", Sensors ? "" : Switches ? "Ein" : "Offen", Sensors ? "" : Switches ? "Aus" : "Geschlossen", Sensors ? "Messwert" : Switches ? "Schalter" : "Automatisch"); };
             remove.Click += delegate { if (grid.CurrentRow != null) grid.Rows.Remove(grid.CurrentRow); };
             up.Click += delegate { MoveRow(-1); };
             down.Click += delegate { MoveRow(1); };
@@ -499,12 +632,12 @@ sealed class DoorWidget : Form
                 if (settings == null) throw new ArgumentException("Bitte zuerst Home Assistant einrichten.");
                 var sensors = await Options.LoadSensors(new Uri(settings.Url), settings.ReadToken());
                 if (IsDisposed) return;
-                using (var picker = new Options.SensorPicker(sensors, Cover ? "window_cover" : Heating ? "climate" : Switches ? "switch" : null, ""))
+                using (var picker = new Options.SensorPicker(sensors, Sensors ? "any_sensor" : Cover ? "window_cover" : Heating ? "climate" : Switches ? "switch" : null, ""))
                 {
                     if (picker.ShowDialog(this) != DialogResult.OK) return;
                     var sensor = picker.Selection;
-                    grid.Rows.Add(sensor.entity_id, sensor.attributes.friendly_name ?? sensor.entity_id, Switches ? "Ein" : "Offen", Switches ? "Aus" : "Geschlossen",
-                        Switches ? "Schalter" :
+                    grid.Rows.Add(sensor.entity_id, sensor.attributes.friendly_name ?? sensor.entity_id, Sensors ? "" : Switches ? "Ein" : "Offen", Sensors ? "" : Switches ? "Aus" : "Geschlossen",
+                        Sensors ? (sensor.attributes.device_class == "humidity" ? "Luftfeuchtigkeit" : "Messwert") : Switches ? "Schalter" :
                         sensor.attributes.device_class == "garage_door" ? "Garagentor" :
                         sensor.attributes.device_class == "window" ? "Fenster" : "Automatisch");
                 }
@@ -512,6 +645,13 @@ sealed class DoorWidget : Form
             catch (ArgumentException ex) { if (!IsDisposed) MessageBox.Show(this, ex.Message, Text); }
             catch (Exception) { if (!IsDisposed) MessageBox.Show(this, "Die Türsensoren konnten nicht geladen werden.", Text); }
             finally { if (!add.IsDisposed) add.Enabled = true; }
+        }
+
+        static int? ReadDecimals(object value)
+        {
+            int result;
+            return int.TryParse(Convert.ToString(value), out result) && result >= 0 && result <= 6
+                ? (int?)result : null;
         }
 
         internal Door[] ReadRows()
@@ -522,7 +662,9 @@ sealed class DoorWidget : Form
                 Name = Convert.ToString(row.Cells[1].Value).Trim(),
                 Open = Convert.ToString(row.Cells[2].Value).Trim(),
                 Closed = Convert.ToString(row.Cells[3].Value).Trim(),
-                IconKind = Convert.ToString(row.Cells[4].Value)
+                IconKind = Convert.ToString(row.Cells[4].Value),
+                Decimals = Sensors ? ReadDecimals(row.Cells[2].Value) : null,
+                Unit = Sensors ? Convert.ToString(row.Cells[3].Value).Trim() : null
             }).ToArray();
         }
 
@@ -530,7 +672,14 @@ sealed class DoorWidget : Form
         {
             grid.EndEdit();
             var doors = ReadRows();
-            if (doors.Any(door => !(Cover ? HeatingWidget.IsCover(door.Entity) : Heating ? HeatingWidget.IsClimate(door.Entity) : Switches ? IsSwitchEntity(door.Entity) : Regex.IsMatch(door.Entity, @"^(binary_sensor|cover)\.[a-z0-9_]+$")) ||
+            if (Sensors && (WidgetName.Length == 0 || doors.Length == 0 ||
+                doors.Any(door => !IsSensor(door.Entity) || door.Name.Length == 0 ||
+                    (!string.IsNullOrWhiteSpace(door.Open) && !door.Decimals.HasValue))))
+            {
+                MessageBox.Show(this, "Bitte einen Widget-Namen und mindestens einen Sensor eintragen. Nachkommastellen: leer oder 0 bis 6.", SensorTitle);
+                return false;
+            }
+            if (!Sensors && doors.Any(door => !(Cover ? HeatingWidget.IsCover(door.Entity) : Heating ? HeatingWidget.IsClimate(door.Entity) : Switches ? IsSwitchEntity(door.Entity) : Regex.IsMatch(door.Entity, @"^(binary_sensor|cover)\.[a-z0-9_]+$")) ||
                 door.Name.Length == 0 || (!DeviceRows && (door.Open.Length == 0 || door.Closed.Length == 0))))
             {
                 MessageBox.Show(this, "Bitte pro Sensor eine gültige Entitäts-ID, einen Namen und beide Statustexte eintragen.", Switches ? SwitchTitle : DoorTitle);
