@@ -72,6 +72,29 @@ sealed class HeatingWidget : Form
         menu.Items.Add("Aktualisieren", null, async delegate { await RefreshDevice(); });
         menu.Items.Add("Schließen", null, delegate { Hide(); });
         ContextMenuStrip = menu;
+        if (cover)
+        {
+            var stop = new ToolStripMenuItem("Rollladen anhalten") { ForeColor = Color.WhiteSmoke };
+            menu.Items.Insert(0, stop);
+            ThermostatRow selected = null;
+            menu.Opening += delegate
+            {
+                var point = PointToClient(Cursor.Position);
+                int index = Array.FindIndex(hits, hit => !hit.IsEmpty && point.Y >= hit.Top && point.Y < hit.Bottom);
+                var list = thermostats;
+                selected = index >= 0 && index / 3 < list.Length ? list[index / 3] : null;
+                var state = selected == null ? null : selected.Current;
+                stop.Visible = !busy && selected != null && !selected.Pending && state != null &&
+                    state.attributes != null && state.state != "unknown" && state.state != "unavailable" &&
+                    (state.attributes.supported_features & 8) != 0;
+            };
+            stop.Click += async delegate
+            {
+                var settings = connection();
+                if (selected != null && !selected.IsDisposed && !selected.Pending && settings != null)
+                    await SendCover(selected, settings, "stop_cover", new { entity_id = selected.Entity });
+            };
+        }
         Deactivate += delegate { CancelCoverEdit(); };
         VisibleChanged += delegate { if (!Visible) CancelCoverEdit(); };
         timer.Tick += async delegate { await RefreshDevice(); };

@@ -42,6 +42,10 @@ sealed class Door
             case "open": return Open;
             case "off":
             case "closed": return Closed;
+            case "playing": return "Wiedergabe";
+            case "paused": return "Pause";
+            case "idle": return "Bereit";
+            case "standby": return "Standby";
             case "opening": return "Öffnet";
             case "closing": return "Schließt";
             default: return "Nicht verfügbar";
@@ -134,7 +138,7 @@ sealed class DoorWidget : Form
 
     internal static bool IsSwitchEntity(string entity)
     {
-        return Regex.IsMatch(entity, @"^(switch|light|input_boolean|fan|binary_sensor)\.[a-z0-9_]+$");
+        return Regex.IsMatch(entity, @"^(switch|light|input_boolean|fan|binary_sensor|media_player|scene|script)\.[a-z0-9_]+$");
     }
     readonly Func<Settings> connection;
     Point? dragStart;
@@ -148,6 +152,7 @@ sealed class DoorWidget : Form
     RectangleF[] switchBounds = new RectangleF[0];
     int pressedSwitch = -1;
     string[] lastStates;
+    SolarTile.Sensor[] deviceStates;
 
     static bool HasDoors(DoorSettings saved)
     {
@@ -183,6 +188,7 @@ sealed class DoorWidget : Form
         menu.Items.Add("Aktualisieren", null, async delegate { await RefreshDoors(); });
         menu.Items.Add("Schließen", null, delegate { Hide(); });
         ContextMenuStrip = menu;
+        if (switches) menu.Opening += delegate { PopulateDeviceMenu(menu); };
         try
         {
             if (File.Exists(configPath))
@@ -265,33 +271,148 @@ sealed class DoorWidget : Form
         return Array.FindIndex(switchBounds, bounds => bounds.Contains(point));
     }
 
+    int DeviceAt(Point point)
+    {
+        var style = config.Appearance ?? new Appearance();
+        for (int i = Math.Min(config.Doors.Length, switchBounds.Length) - 1; i >= 0; i--)
+        {
+            var bounds = switchBounds[i];
+            if (style.Vertical ? point.Y >= bounds.Top : point.X >= bounds.Left) return i;
+        }
+        return -1;
+    }
+
+    void PopulateDeviceMenu(ContextMenuStrip menu)
+    {
+        const string key = "DeviceActions";
+        if (menu.Items.ContainsKey(key)) menu.Items[key].Dispose();
+        int index = DeviceAt(PointToClient(Cursor.Position));
+        if (index < 0) return;
+        var device = config.Doors[index];
+        var options = DeviceActions(index);
+        if (options.Count == 0) return;
+        var actions = new ToolStripMenuItem(device.Name) { Name = key, ForeColor = Color.WhiteSmoke };
+        actions.DropDownItems.AddRange(options.ToArray());
+        menu.Items.Insert(0, actions);
+    }
+
+    System.Collections.Generic.List<ToolStripItem> DeviceActions(int index)
+    {
+        var items = new System.Collections.Generic.List<ToolStripItem>();
+        if (switching || index < 0 || index >= config.Doors.Length) return items;
+        var door = config.Doors[index];
+        string entity = door.Entity;
+        string domain = entity.Split('.')[0];
+        var sensor = deviceStates != null && index < deviceStates.Length ? deviceStates[index] : null;
+        if (sensor == null || sensor.state == "unavailable" || sensor.state == "unknown") return items;
+        int features = sensor.attributes == null ? 0 : sensor.attributes.supported_features;
+        Action<ToolStripItemCollection, string, string, object> add = (list, label, action, payload) =>
+        {
+            var item = new ToolStripMenuItem(label) { ForeColor = Color.WhiteSmoke };
+            item.Click += async delegate { await SendDeviceAction(entity, action, payload); };
+            list.Add(item);
+        };
+        using (var group = new ToolStripMenuItem())
+        {
+            if (domain == "scene" || domain == "script")
+                add(group.DropDownItems, domain == "scene" ? "Szene aktivieren" : "Skript starten", "turn_on", new { entity_id = entity });
+            if (domain == "light" || domain == "fan" || domain == "switch" || domain == "input_boolean")
+            {
+                string action = sensor.state == "on" ? "turn_off" : "turn_on";
+                add(group.DropDownItems, sensor.state == "on" ? "Ausschalten" : "Einschalten", action, new { entity_id = entity });
+            }
+            var modes = sensor.attributes == null ? null : sensor.attributes.supported_color_modes;
+            if (domain == "light" && modes != null && modes.Any(mode => mode != "onoff" && mode != "unknown"))
+                group.DropDownItems.Add(LevelMenu("Helligkeit", value => SendDeviceAction(entity, "turn_on", new { entity_id = entity, brightness_pct = value })));
+            if (domain == "fan" && (features & 1) != 0)
+                group.DropDownItems.Add(LevelMenu("Lüfterstufe", value => SendDeviceAction(entity, "set_percentage", new { entity_id = entity, percentage = value })));
+            if (domain == "media_player")
+            {
+                if ((features & 16384) != 0) add(group.DropDownItems, "Wiedergabe", "media_play", new { entity_id = entity });
+                if ((features & 1) != 0) add(group.DropDownItems, "Pause", "media_pause", new { entity_id = entity });
+                if ((features & 4096) != 0) add(group.DropDownItems, "Stopp", "media_stop", new { entity_id = entity });
+                if ((features & 16) != 0) add(group.DropDownItems, "Vorheriger Titel", "media_previous_track", new { entity_id = entity });
+                if ((features & 32) != 0) add(group.DropDownItems, "Nächster Titel", "media_next_track", new { entity_id = entity });
+                if ((features & 128) != 0) add(group.DropDownItems, "Einschalten", "turn_on", new { entity_id = entity });
+                if ((features & 256) != 0) add(group.DropDownItems, "Ausschalten", "turn_off", new { entity_id = entity });
+                if ((features & 4) != 0)
+                    group.DropDownItems.Add(LevelMenu("Lautstärke", value => SendDeviceAction(entity, "volume_set", new { entity_id = entity, volume_level = value / 100m })));
+            }
+            items.AddRange(group.DropDownItems.Cast<ToolStripItem>());
+            group.DropDownItems.Clear();
+        }
+        return items;
+    }
+
+    static ToolStripMenuItem LevelMenu(string label, Func<int, Task> apply)
+    {
+        var menu = new ToolStripMenuItem(label) { ForeColor = Color.WhiteSmoke };
+        var level = new ToolStripTextBox { AccessibleName = label + " in Prozent", MaxLength = 3, Width = 65,
+            BackColor = Input, ForeColor = Color.WhiteSmoke, ToolTipText = "0–100 eingeben, mit Enter bestätigen" };
+        Action submit = async delegate
+        {
+            int value;
+            if (!int.TryParse(level.Text, out value) || value < 0 || value > 100) return;
+            menu.DropDown.Close();
+            await apply(value);
+        };
+        level.KeyDown += delegate(object sender, KeyEventArgs args)
+        {
+            if (args.KeyCode != Keys.Enter) return;
+            args.SuppressKeyPress = true;
+            submit();
+        };
+        menu.DropDownItems.Add(level);
+        menu.DropDownItems.Add("Übernehmen (%)", null, delegate { submit(); }).ForeColor = Color.WhiteSmoke;
+        return menu;
+    }
+
     async Task ToggleSwitch(int index)
     {
         if (switching || index >= config.Doors.Length || lastStates == null) return;
         string state = lastStates[index];
-        if (state != "on" && state != "off") return;
         string entity = config.Doors[index].Entity;
         string domain = entity.Split('.')[0];
+        if (domain == "media_player")
+        {
+            var controls = new WidgetMenu();
+            controls.Items.AddRange(DeviceActions(index).ToArray());
+            if (controls.Items.Count == 0) { controls.Dispose(); return; }
+            controls.Closed += delegate { BeginInvoke(new Action(controls.Dispose)); };
+            controls.Show(Cursor.Position);
+            return;
+        }
+        if (domain == "scene" || domain == "script")
+        {
+            if (state != null && state != "unavailable" && state != "unknown")
+                await SendDeviceAction(entity, "turn_on", new { entity_id = entity });
+            return;
+        }
+        if (state != "on" && state != "off") return;
         if (domain != "switch" && domain != "light" && domain != "input_boolean" && domain != "fan") return;
+        await SendDeviceAction(entity, state == "on" ? "turn_off" : "turn_on", new { entity_id = entity });
+    }
+
+    async Task SendDeviceAction(string entity, string service, object payload)
+    {
+        if (switching || IsDisposed || !config.Doors.Any(door => door.Entity == entity)) return;
         var settings = connection();
         if (settings == null) return;
         switching = true;
         try
         {
-            string service = state == "on" ? "turn_off" : "turn_on";
-            string url = settings.Url.TrimEnd('/') + "/api/services/" + domain + "/" + service;
+            string url = settings.Url.TrimEnd('/') + "/api/services/" + entity.Split('.')[0] + "/" + service;
             using (var request = new HttpRequestMessage(HttpMethod.Post, url))
             {
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.ReadToken());
-                request.Content = new StringContent(new JavaScriptSerializer().Serialize(new { entity_id = entity }),
+                request.Content = new StringContent(new JavaScriptSerializer().Serialize(payload),
                     System.Text.Encoding.UTF8, "application/json");
                 using (var response = await client.SendAsync(request)) response.EnsureSuccessStatusCode();
             }
-            lastStates = null;
         }
         catch (Exception)
         {
-            if (!IsDisposed) MessageBox.Show(this, "Home Assistant konnte den Schalter nicht umstellen.", Text);
+            if (!IsDisposed) MessageBox.Show(this, "Home Assistant konnte die Aktion nicht ausführen.", Text);
         }
         finally { switching = false; }
         if (!IsDisposed) await RefreshDoors();
@@ -348,12 +469,13 @@ sealed class DoorWidget : Form
     void Render(Door[] doors, string[] states)
     {
         lastStates = states;
+        if (states == null) deviceStates = null;
         switchBounds = new RectangleF[switches ? Math.Max(1, doors.Length) : 0];
         var names = doors.Length == 0 ? new[] { IsSensorWidget ? WidgetName : switches ? SwitchTitle : DoorTitle } : doors.Select(door => door.Name).ToArray();
         var values = doors.Length == 0 ? new[] { switches ? "Schalter hinzufügen" : "Sensoren hinzufügen" } : doors.Select((door, index) =>
             states == null ? "—" : IsSensorWidget ? states[index] ?? "—" : door.Describe(states[index])).ToArray();
         var opened = doors.Select((door, index) => states != null &&
-            (states[index] == "on" || states[index] == "open" || states[index] == "opening")).ToArray();
+            (states[index] == "on" || states[index] == "playing" || states[index] == "open" || states[index] == "opening")).ToArray();
         if (opened.Length == 0) opened = new bool[1];
         if (switches && doors.Length == 0) doors = new[] { new Door { IconKind = "Schalter" } };
         float scale = LayeredTile.ScaleFor(this);
@@ -453,12 +575,17 @@ sealed class DoorWidget : Form
         try
         {
             string token = settings.ReadToken();
-            var states = await Task.WhenAll(doors.Select(door => ReadState(door, settings.Url, token)));
-            if (!IsDisposed && doors == config.Doors && !switching) Render(doors, states);
+            var received = await Task.WhenAll(doors.Select(door => ReadState(door, settings.Url, token)));
+            if (!IsDisposed && doors == config.Doors && !switching && connection() == settings)
+            {
+                deviceStates = received;
+                Render(doors, received.Select((state, index) => IsSensorWidget
+                    ? SensorValue(state, doors[index].Decimals, doors[index].Unit) : state == null ? null : state.state).ToArray());
+            }
         }
         catch (Exception)
         {
-            if (!IsDisposed && doors == config.Doors) Render(doors, new string[doors.Length]);
+            if (!IsDisposed && doors == config.Doors) Render(doors, null);
         }
         finally { loading = false; }
         if (!IsDisposed && (doors != config.Doors || refreshQueued))
@@ -468,7 +595,7 @@ sealed class DoorWidget : Form
         }
     }
 
-    async Task<string> ReadState(Door door, string url, string token)
+    async Task<SolarTile.Sensor> ReadState(Door door, string url, string token)
     {
         try
         {
@@ -479,7 +606,7 @@ sealed class DoorWidget : Form
                 {
                     if (!response.IsSuccessStatusCode) return null;
                     var state = new JavaScriptSerializer().Deserialize<SolarTile.Sensor>(await response.Content.ReadAsStringAsync());
-                    return IsSensorWidget ? SensorValue(state, door.Decimals, door.Unit) : state == null ? null : state.state;
+                    return state;
                 }
             }
         }

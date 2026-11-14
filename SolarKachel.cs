@@ -1397,6 +1397,8 @@ sealed class SolarTile : Form
         public string unit_of_measurement { get; set; }
         public string friendly_name { get; set; }
         public string device_class { get; set; }
+        public int supported_features { get; set; }
+        public string[] supported_color_modes { get; set; }
     }
 
     [DllImport("user32.dll")]
