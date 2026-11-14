@@ -323,9 +323,19 @@ sealed class DoorWidget : Form
         }, doors != null && doors.Length > 0 && doors[0].IconKind == "Schalter", bounds);
     }
 
-    async Task RefreshDoors()
+    bool refreshQueued;
+
+    internal Task RefreshLive(string[] changes)
     {
-        if (loading || switching || IsDisposed || !Visible || config.Doors.Length == 0) return;
+        if (!Visible || !changes.Any(entity => entity == null || config.Doors.Any(door => door.Entity == entity)))
+            return Task.FromResult(0);
+        return RefreshDoors(true);
+    }
+
+    async Task RefreshDoors(bool live = false)
+    {
+        if (IsDisposed || !Visible || config.Doors.Length == 0) return;
+        if (loading || switching) { refreshQueued |= live; return; }
         var doors = config.Doors;
         var settings = connection();
         if (settings == null) return;
@@ -341,7 +351,11 @@ sealed class DoorWidget : Form
             if (!IsDisposed && doors == config.Doors) Render(doors, new string[doors.Length]);
         }
         finally { loading = false; }
-        if (!IsDisposed && doors != config.Doors) await RefreshDoors();
+        if (!IsDisposed && (doors != config.Doors || refreshQueued))
+        {
+            refreshQueued = false;
+            await RefreshDoors();
+        }
     }
 
     async Task<string> ReadState(Door door, string url, string token)
@@ -371,9 +385,12 @@ sealed class DoorWidget : Form
 
         internal readonly bool Switches;
         internal readonly bool Heating;
-        internal DoorEditor(Door[] doors, Func<Settings> connection, bool switches = false, bool heating = false)
+        internal readonly bool Cover;
+        internal bool DeviceRows { get { return Heating || Cover; } }
+        internal DoorEditor(Door[] doors, Func<Settings> connection, bool switches = false, bool heating = false, bool cover = false)
         {
             Heating = heating;
+            Cover = cover;
             this.connection = connection;
             Switches = switches;
             Font = new Font("Segoe UI", 10);
@@ -420,7 +437,7 @@ sealed class DoorWidget : Form
                     picker.DroppedDown = true;
                 }
             };
-            if (heating) { grid.Columns[2].Visible = false; grid.Columns[3].Visible = false; icons.Visible = false; }
+            if (DeviceRows) { grid.Columns[2].Visible = false; grid.Columns[3].Visible = false; icons.Visible = false; }
             foreach (DataGridViewColumn column in grid.Columns) column.SortMode = DataGridViewColumnSortMode.NotSortable;
             foreach (var door in doors)
                 grid.Rows.Add(door.Entity, door.Name, door.Open, door.Closed, switches ? "Schalter" : door.IconKind ?? "Automatisch");
@@ -428,8 +445,8 @@ sealed class DoorWidget : Form
             var add = Button("Sensor auswählen…", 0, 151);
             var manual = Button("Manuell hinzufügen", 157, 150);
             var remove = Button("Entfernen", 313, 86);
-            var up = Button(heating ? "↑ Nach oben" : "↑ Nach links", 405, 109);
-            var down = Button(heating ? "↓ Nach unten" : "↓ Nach rechts", 520, 124);
+            var up = Button(DeviceRows ? "↑ Nach oben" : "↑ Nach links", 405, 109);
+            var down = Button(DeviceRows ? "↓ Nach unten" : "↓ Nach rechts", 520, 124);
             add.Click += async delegate { await SelectDoor(add); };
             manual.Click += delegate { grid.Rows.Add("", "", Switches ? "Ein" : "Offen", Switches ? "Aus" : "Geschlossen", Switches ? "Schalter" : "Automatisch"); };
             remove.Click += delegate { if (grid.CurrentRow != null) grid.Rows.Remove(grid.CurrentRow); };
@@ -482,7 +499,7 @@ sealed class DoorWidget : Form
                 if (settings == null) throw new ArgumentException("Bitte zuerst Home Assistant einrichten.");
                 var sensors = await Options.LoadSensors(new Uri(settings.Url), settings.ReadToken());
                 if (IsDisposed) return;
-                using (var picker = new Options.SensorPicker(sensors, Heating ? "climate" : Switches ? "switch" : null, ""))
+                using (var picker = new Options.SensorPicker(sensors, Cover ? "window_cover" : Heating ? "climate" : Switches ? "switch" : null, ""))
                 {
                     if (picker.ShowDialog(this) != DialogResult.OK) return;
                     var sensor = picker.Selection;
@@ -513,8 +530,8 @@ sealed class DoorWidget : Form
         {
             grid.EndEdit();
             var doors = ReadRows();
-            if (doors.Any(door => !(Heating ? HeatingWidget.IsClimate(door.Entity) : Switches ? IsSwitchEntity(door.Entity) : Regex.IsMatch(door.Entity, @"^(binary_sensor|cover)\.[a-z0-9_]+$")) ||
-                door.Name.Length == 0 || (!Heating && (door.Open.Length == 0 || door.Closed.Length == 0))))
+            if (doors.Any(door => !(Cover ? HeatingWidget.IsCover(door.Entity) : Heating ? HeatingWidget.IsClimate(door.Entity) : Switches ? IsSwitchEntity(door.Entity) : Regex.IsMatch(door.Entity, @"^(binary_sensor|cover)\.[a-z0-9_]+$")) ||
+                door.Name.Length == 0 || (!DeviceRows && (door.Open.Length == 0 || door.Closed.Length == 0))))
             {
                 MessageBox.Show(this, "Bitte pro Sensor eine gültige Entitäts-ID, einen Namen und beide Statustexte eintragen.", Switches ? SwitchTitle : DoorTitle);
                 return false;

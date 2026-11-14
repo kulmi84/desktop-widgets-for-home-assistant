@@ -13,8 +13,16 @@ using System.Windows.Forms;
 sealed class HeatingWidget : Form
 {
     internal const string Title = "Heizung";
-    static readonly string FilePath = Path.Combine(Environment.GetFolderPath(
-        Environment.SpecialFolder.LocalApplicationData), "SolarKachel", "heating.json");
+    internal const string CoverTitle = "Rollläden";
+    readonly bool cover;
+    readonly string configFile;
+
+    static string ConfigFile(bool cover)
+    {
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "SolarKachel", cover ? "covers.json" : "heating.json");
+    }
+    readonly string positionFile;
     readonly Func<Settings> connection;
     readonly FlowLayoutPanel rows = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown,
         WrapContents = false, AutoScroll = true, Dock = DockStyle.Fill, Padding = new Padding(10, 8, 10, 8) };
@@ -32,12 +40,18 @@ sealed class HeatingWidget : Form
     System.Collections.Generic.Dictionary<string, string> names = new System.Collections.Generic.Dictionary<string, string>();
     ThermostatRow[] thermostats { get { return rows.Controls.OfType<ThermostatRow>().ToArray(); } }
     Rectangle[] hits = new Rectangle[0];
+    ThermostatRow editingCover;
+    string positionInput;
+    bool selectPosition;
 
 
-    internal HeatingWidget(Func<Settings> connection)
+    internal HeatingWidget(Func<Settings> connection, string positionFile = null, bool cover = false)
     {
         this.connection = connection;
-        Text = Title;
+        this.cover = cover;
+        configFile = ConfigFile(cover);
+        this.positionFile = positionFile ?? Path.Combine(Path.GetDirectoryName(configFile), cover ? "covers-position.json" : "heating-position.json");
+        Text = cover ? CoverTitle : Title;
         Icon = WidgetIcon.Load();
         ShowInTaskbar = false;
         FormBorderStyle = FormBorderStyle.None;
@@ -52,12 +66,14 @@ sealed class HeatingWidget : Form
         rows.Controls.Add(status);
         MouseDown += BeginPointerAction;
         MouseMove += MoveTile;
-        MouseCaptureChanged += delegate { dragArmed = false; pressedRow = null; };
+        MouseCaptureChanged += delegate { FinishDrag(); pressedRow = null; };
         var menu = new WidgetMenu();
         menu.Items.Add("Einstellungen", null, async delegate { await SelectDevices(); });
         menu.Items.Add("Aktualisieren", null, async delegate { await RefreshDevice(); });
         menu.Items.Add("Schließen", null, delegate { Hide(); });
         ContextMenuStrip = menu;
+        Deactivate += delegate { CancelCoverEdit(); };
+        VisibleChanged += delegate { if (!Visible) CancelCoverEdit(); };
         timer.Tick += async delegate { await RefreshDevice(); };
         VisibleChanged += async delegate
         {
@@ -68,9 +84,9 @@ sealed class HeatingWidget : Form
         {
             try
             {
-                if (File.Exists(FilePath))
+                if (File.Exists(configFile))
                 {
-                    string json = File.ReadAllText(FilePath);
+                    string json = File.ReadAllText(configFile);
                     var serializer = new JavaScriptSerializer();
                     if (json.TrimStart().StartsWith("[")) entities = serializer.Deserialize<string[]>(json) ?? entities;
                     else
@@ -83,8 +99,9 @@ sealed class HeatingWidget : Form
                     }
                 }
             }
-            catch (Exception) { status.Text = "Gespeicherte Thermostate konnten nicht gelesen werden."; return; }
-            UpdateDevices(entities.Where(IsClimate).ToArray());
+            catch (Exception) { SetStatus("Gespeicherte Einstellungen konnten nicht gelesen werden."); return; }
+            UpdateDevices(entities.Where(cover ? (Func<string, bool>)IsCover : IsClimate).ToArray());
+            RestorePosition();
             if (entities.Length == 0) await SelectDevices();
             else await RefreshDevice();
         };
@@ -96,12 +113,12 @@ sealed class HeatingWidget : Form
         get { var value = base.CreateParams; value.ExStyle |= 0x80000; return value; }
     }
 
-    internal static Bitmap Preview(Appearance appearance, Door[] doors, float scale)
+    internal static Bitmap Preview(Appearance appearance, Door[] doors, float scale, bool cover = false)
     {
-        var labels = doors.Length == 0 ? new[] { "Heizung Wohnzimmer" } : doors.Select(door => door.Name).ToArray();
-        return DrawTile(appearance, labels, labels.Select(_ => "20,5°").ToArray(),
-            labels.Select(_ => "21°").ToArray(), labels.Select(_ => true).ToArray(),
-            labels.Select(_ => true).ToArray(), scale, 0, new Rectangle[labels.Length * 2]);
+        var labels = doors.Length == 0 ? new[] { cover ? "Rollo Wohnzimmer" : "Heizung Wohnzimmer" } : doors.Select(door => door.Name).ToArray();
+        return DrawTile(appearance, labels, labels.Select(_ => cover ? "" : "20,5°").ToArray(),
+            labels.Select(_ => cover ? "65 %" : "21°").ToArray(), labels.Select(_ => true).ToArray(),
+            labels.Select(_ => true).ToArray(), scale, 0, new Rectangle[labels.Length * (cover ? 3 : 2)], cover);
     }
 
     void Render()
@@ -109,12 +126,12 @@ sealed class HeatingWidget : Form
         if (!Visible || !IsHandleCreated || IsDisposed) return;
         var list = thermostats;
         var captions = list.Select(row => row.NameLabel.Text).ToArray();
-        if (captions.Length == 0) captions = new[] { "Thermostate auswählen" };
+        if (captions.Length == 0) captions = new[] { cover ? "Rollläden auswählen" : "Thermostate auswählen" };
         if (status.Text.Length != 0) captions = captions.Concat(new[] { status.Text }).ToArray();
-        hits = new Rectangle[captions.Length * 2];
+        hits = new Rectangle[captions.Length * (cover ? 3 : 2)];
         using (var image = DrawTile(style, captions, list.Select(row => row.Actual.Text).ToArray(),
-            list.Select(row => row.Target.Text).ToArray(), list.Select(row => row.Minus.Enabled).ToArray(),
-            list.Select(row => row.Plus.Enabled).ToArray(), LayeredTile.ScaleFor(this), 1, hits))
+            list.Select(row => row == editingCover ? positionInput + " %" : row.Target.Text).ToArray(), list.Select(row => row.Minus.Enabled).ToArray(),
+            list.Select(row => row.Plus.Enabled).ToArray(), LayeredTile.ScaleFor(this), 1, hits, cover, Array.IndexOf(list, editingCover), selectPosition))
         {
             if (ClientSize != image.Size) ClientSize = image.Size;
             LayeredTile.Present(Handle, image);
@@ -122,7 +139,7 @@ sealed class HeatingWidget : Form
     }
 
     static Bitmap DrawTile(Appearance style, string[] captions, string[] actual, string[] target,
-        bool[] minus, bool[] plus, float scale, int minimumAlpha, Rectangle[] hits)
+        bool[] minus, bool[] plus, float scale, int minimumAlpha, Rectangle[] hits, bool cover, int editIndex = -1, bool selected = false)
     {
         int inset = (int)Math.Round(style.FramePadding * scale);
         int icon = Math.Max(1, (int)Math.Round(style.IconSize * scale));
@@ -131,12 +148,12 @@ sealed class HeatingWidget : Form
         using (var bold = new Font(font, FontStyle.Bold))
         {
             int row = Math.Max(icon, font.Height + (int)Math.Round(5 * scale));
-            int actualWidth = actual.Concat(new[] { "20,5°" })
+            int actualWidth = cover ? 0 : actual.Concat(new[] { "20,5°" })
                 .Max(value => TextRenderer.MeasureText(value, font).Width);
-            int targetWidth = target.Concat(new[] { "20,5°" })
+            int targetWidth = target.Concat(new[] { cover ? "100 %" : "20,5°" })
                 .Max(value => TextRenderer.MeasureText(value, bold, Size.Empty, TextFormatFlags.NoPadding).Width)
                 + Math.Max(2, (int)Math.Round(2 * scale));
-            int button = Math.Max(1, (int)Math.Round(13 * scale));
+            int button = Math.Max(1, (int)Math.Round((cover ? 24 : 13) * scale));
             int name = captions.Max(value => TextRenderer.MeasureText(value, font).Width);
             int width = 2 * inset + icon + actualWidth + targetWidth + name + button * 2 + 8;
             int height = 2 * inset + row * captions.Length + gap * (captions.Length - 1);
@@ -171,16 +188,27 @@ sealed class HeatingWidget : Form
                         var state = g.Save();
                         g.TranslateTransform(inset, y + (row - icon) / 2);
                         g.ScaleTransform(icon / 32f, icon / 32f);
-                        DoorIcons.DrawHeatWave(g, Color.FromArgb(style.Icons));
+                        if (cover) DoorIcons.DrawCover(g, Color.FromArgb(style.Icons));
+                        else DoorIcons.DrawHeatWave(g, Color.FromArgb(style.Icons));
                         g.Restore(state);
-                        g.DrawString(actual[i], font, text, new Rectangle(x, y, actualWidth, row), left);
+                        if (!cover) g.DrawString(actual[i], font, text, new Rectangle(x, y, actualWidth, row), left);
                         g.DrawString(captions[i], font, text, new Rectangle(x + actualWidth, y, name, row), left);
                         x += actualWidth + name;
-                        hits[i * 2] = new Rectangle(x, y, button, row);
-                        hits[i * 2 + 1] = new Rectangle(x + button + targetWidth, y, button, row);
-                        g.DrawString("−", font, minus[i] ? text : muted, hits[i * 2], center);
-                        g.DrawString(target[i], bold, text, new Rectangle(x + button, y, targetWidth, row), center);
-                        g.DrawString("+", font, plus[i] ? text : muted, hits[i * 2 + 1], center);
+                        int hit = i * (cover ? 3 : 2);
+                        hits[hit] = new Rectangle(x, y, button, row);
+                        hits[hit + 1] = new Rectangle(x + button + targetWidth, y, button, row);
+                        var position = new Rectangle(x + button, y, targetWidth, row);
+                        if (cover) hits[hit + 2] = position;
+                        g.DrawString(cover ? "↓" : "−", font, minus[i] ? text : muted, hits[hit], center);
+                        if (i == editIndex)
+                        {
+                            using (var border = new Pen(Color.FromArgb(style.Text)))
+                                g.DrawRectangle(border, position.X, position.Y + 2, position.Width - 1, position.Height - 5);
+                            if (selected) g.FillRectangle(text, Rectangle.Inflate(position, -2, -3));
+                        }
+                        using (var inverse = new SolidBrush(Color.FromArgb(style.Background)))
+                            g.DrawString(target[i], bold, i == editIndex && selected ? inverse : text, position, center);
+                        g.DrawString(cover ? "↑" : "+", font, plus[i] ? text : muted, hits[hit + 1], center);
                     }
                     else g.DrawString(captions[i], font, text, new Rectangle(inset, y, width - inset * 2, row), left);
                 }
@@ -194,8 +222,10 @@ sealed class HeatingWidget : Form
         if (args.Button != MouseButtons.Left) return;
         int hit = Array.FindIndex(hits, bounds => bounds.Contains(args.Location));
         var currentRows = thermostats;
-        pressedRow = hit >= 0 && hit / 2 < currentRows.Length ? currentRows[hit / 2] : null;
-        pressedDirection = hit % 2 == 0 ? -1 : 1;
+        int slots = cover ? 3 : 2;
+        if (editingCover != null && (hit < 0 || hit % slots != 2)) CancelCoverEdit();
+        pressedRow = hit >= 0 && hit / slots < currentRows.Length ? currentRows[hit / slots] : null;
+        pressedDirection = hit % slots - 1;
         dragArmed = pressedRow == null;
         dragOrigin = Cursor.Position;
         windowOrigin = Location;
@@ -218,7 +248,7 @@ sealed class HeatingWidget : Form
         {
             var row = pressedRow;
             int direction = pressedDirection;
-            dragArmed = false;
+            FinishDrag();
             pressedRow = null;
             base.WndProc(ref message);
             if (row != null && !row.IsDisposed)
@@ -228,11 +258,57 @@ sealed class HeatingWidget : Form
         base.WndProc(ref message);
     }
 
+    internal void RestorePosition()
+    {
+        try
+        {
+            if (!File.Exists(positionFile)) return;
+            var saved = new JavaScriptSerializer().Deserialize<DoorPosition>(File.ReadAllText(positionFile));
+            if (saved == null) return;
+            var point = new Point(saved.X, saved.Y);
+            var area = Screen.FromPoint(point).WorkingArea;
+            Location = new Point(Math.Max(area.Left, Math.Min(point.X, area.Right - Width)),
+                Math.Max(area.Top, Math.Min(point.Y, area.Bottom - Height)));
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+        catch (ArgumentException) { }
+        catch (InvalidOperationException) { }
+    }
+
+    void FinishDrag()
+    {
+        bool moved = dragArmed && Location != windowOrigin;
+        dragArmed = false;
+        if (moved) SavePosition();
+    }
+
+    internal void SavePosition()
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(positionFile));
+            string temp = positionFile + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                File.WriteAllText(temp, new JavaScriptSerializer().Serialize(new DoorPosition { X = Left, Y = Top }));
+                if (File.Exists(positionFile)) File.Replace(temp, positionFile, null);
+                else File.Move(temp, positionFile);
+            }
+            finally { File.Delete(temp); }
+        }
+        catch (IOException) { SetStatus("Position konnte nicht gespeichert werden."); }
+        catch (UnauthorizedAccessException) { SetStatus("Position konnte nicht gespeichert werden."); }
+    }
+
     async void CommitClick(ThermostatRow row, int direction)
     {
-        int index = Array.IndexOf(thermostats, row) * 2 + (direction > 0 ? 1 : 0);
-        if (index >= 0 && index < hits.Length && hits[index].Contains(PointToClient(Cursor.Position)))
-            await Step(row, direction);
+        int rowIndex = Array.IndexOf(thermostats, row);
+        if (rowIndex < 0) return;
+        int index = rowIndex * (cover ? 3 : 2) + direction + 1;
+        if (index >= hits.Length || !hits[index].Contains(PointToClient(Cursor.Position))) return;
+        if (cover && direction == 1) BeginCoverEdit(row);
+        else await Step(row, direction == 0 ? 1 : -1);
     }
 
     sealed class Radiator : Control
@@ -253,12 +329,13 @@ sealed class HeatingWidget : Form
         }
     }
 
-    internal static Appearance SavedStyle()
+    internal static Appearance SavedStyle(bool cover = false)
     {
+        string configFile = ConfigFile(cover);
         try
         {
-            if (!File.Exists(FilePath)) return null;
-            var json = File.ReadAllText(FilePath);
+            if (!File.Exists(configFile)) return null;
+            var json = File.ReadAllText(configFile);
             return json.TrimStart().StartsWith("[") ? null :
                 new JavaScriptSerializer().Deserialize<HeatingSettings>(json).Style;
         }
@@ -266,6 +343,11 @@ sealed class HeatingWidget : Form
         catch (UnauthorizedAccessException) { return null; }
         catch (ArgumentException) { return null; }
         catch (InvalidOperationException) { return null; }
+    }
+
+    internal static bool IsCover(string entity)
+    {
+        return entity != null && System.Text.RegularExpressions.Regex.IsMatch(entity, @"^cover\.[a-z0-9_]+$");
     }
 
     internal static bool IsClimate(string entity)
@@ -280,13 +362,13 @@ sealed class HeatingWidget : Form
             old.Dispose();
         foreach (string entity in entities)
         {
-            var row = new ThermostatRow(entity, BackColor, ForeColor);
+            var row = new ThermostatRow(entity, BackColor, ForeColor, cover);
             if (names.ContainsKey(entity)) row.NameLabel.Text = names[entity];
             row.Minus.Click += async delegate { await Step(row, -1); };
             row.Plus.Click += async delegate { await Step(row, 1); };
             rows.Controls.Add(row);
         }
-        SetStatus(entities.Length == 0 ? "Rechtsklick → Einstellungen → Thermostate auswählen" : "");
+        SetStatus(entities.Length == 0 ? "Rechtsklick → Einstellungen" : "");
     }
 
     void SetStatus(string message)
@@ -299,6 +381,7 @@ sealed class HeatingWidget : Form
     sealed class ThermostatRow : Panel
     {
         internal readonly string Entity;
+        readonly bool cover;
         internal readonly Control Icon = new Radiator { Bounds = new Rectangle(0, 3, 21, 21) };
         internal readonly Label Actual = new Label { Text = "—", Bounds = new Rectangle(25, 0, 42, 26),
             TextAlign = ContentAlignment.MiddleLeft };
@@ -309,15 +392,16 @@ sealed class HeatingWidget : Form
         internal readonly Button Minus = new Button { Text = "−", Bounds = new Rectangle(204, 1, 23, 24) };
         internal readonly Button Plus = new Button { Text = "+", Bounds = new Rectangle(269, 1, 23, 24) };
         internal ClimateState Current;
-        internal bool Pending, Reading;
+        internal bool Pending, Reading, RefreshQueued;
         internal decimal? DesiredTemperature { get; set; }
         internal int ChangeVersion;
         internal DateTime LastClick;
         internal DateTime ReadAfter;
 
-        internal ThermostatRow(string entity, Color background, Color foreground)
+        internal ThermostatRow(string entity, Color background, Color foreground, bool cover)
         {
             Entity = entity;
+            this.cover = cover;
             Size = new Size(292, 26);
             Margin = new Padding(0, 0, 0, 1);
             BackColor = background;
@@ -343,6 +427,16 @@ sealed class HeatingWidget : Form
         internal void Display()
         {
             var data = Current == null ? null : Current.attributes;
+            if (cover)
+            {
+                if (data != null && NameLabel.Text == Entity) NameLabel.Text = data.friendly_name ?? Entity;
+                bool online = data != null && Current.state != "unknown" && Current.state != "unavailable";
+                Actual.Text = "";
+                Target.Text = online ? CoverValue(Current) : "—";
+                Minus.Enabled = online && !Pending && (data.supported_features & 2) != 0;
+                Plus.Enabled = online && !Pending && (data.supported_features & 1) != 0;
+                return;
+            }
             Actual.Text = Format(data == null ? null : data.current_temperature);
             decimal? target = DesiredTemperature ?? (data == null ? null : data.temperature);
             Target.Text = Format(target);
@@ -352,6 +446,20 @@ sealed class HeatingWidget : Form
                 data.temperature.HasValue && data.min_temp.HasValue && data.max_temp.HasValue;
             Minus.Enabled = available && target > data.min_temp;
             Plus.Enabled = available && target < data.max_temp;
+        }
+    }
+
+    static string CoverValue(ClimateState state)
+    {
+        switch (state.state)
+        {
+            case "opening": return "Öffnet";
+            case "closing": return "Schließt";
+            default:
+                if (state.attributes.current_position.HasValue)
+                    return InvertCoverPosition(state.attributes.current_position.Value).ToString(CultureInfo.CurrentCulture) + " %";
+                if (state.state == "open") return "0 %";
+                return state.state == "closed" ? "100 %" : "—";
         }
     }
 
@@ -365,7 +473,7 @@ sealed class HeatingWidget : Form
             var editor = new DoorWidget.DoorEditor(thermostats.Select(row => new Door
             {
                 Entity = row.Entity, Name = row.NameLabel.Text, Open = "Ein", Closed = "Aus"
-            }).ToArray(), connection, heating: true);
+            }).ToArray(), connection, heating: !cover, cover: cover);
             using (var dialog = new Options(settings, new string[0], style, settings.Appearance, editor))
             {
                 if (dialog.ShowDialog(this) != DialogResult.OK) return;
@@ -376,13 +484,13 @@ sealed class HeatingWidget : Form
                     Names = selected.ToDictionary(door => door.Entity, door => door.Name),
                     Style = dialog.SelectedAppearance
                 };
-                Directory.CreateDirectory(Path.GetDirectoryName(FilePath));
-                string temp = FilePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                Directory.CreateDirectory(Path.GetDirectoryName(configFile));
+                string temp = configFile + "." + Guid.NewGuid().ToString("N") + ".tmp";
                 try
                 {
                     File.WriteAllText(temp, new JavaScriptSerializer().Serialize(saved));
-                    if (File.Exists(FilePath)) File.Replace(temp, FilePath, null);
-                    else File.Move(temp, FilePath);
+                    if (File.Exists(configFile)) File.Replace(temp, configFile, null);
+                    else File.Move(temp, configFile);
                 }
                 finally { File.Delete(temp); }
                 style = saved.Style;
@@ -409,6 +517,14 @@ sealed class HeatingWidget : Form
         }
     }
 
+    internal async Task RefreshLive(string[] changes)
+    {
+        var settings = connection();
+        if (busy || settings == null || !Visible || IsDisposed) return;
+        await Task.WhenAll(thermostats.Where(row => changes.Contains(null) || changes.Contains(row.Entity))
+            .Select(row => RefreshRow(row, settings, true)).ToArray());
+    }
+
     async Task RefreshDevice()
     {
         var settings = connection();
@@ -416,9 +532,10 @@ sealed class HeatingWidget : Form
         await Task.WhenAll(rows.Controls.OfType<ThermostatRow>().Select(row => RefreshRow(row, settings)).ToArray());
     }
 
-    async Task RefreshRow(ThermostatRow row, Settings settings)
+    async Task RefreshRow(ThermostatRow row, Settings settings, bool live = false)
     {
-        if (row.Pending || row.Reading || row.IsDisposed || DateTime.UtcNow < row.ReadAfter) return;
+        if (row.Pending || row.IsDisposed || DateTime.UtcNow < row.ReadAfter) return;
+        if (row.Reading) { row.RefreshQueued |= live; return; }
         int version = row.ChangeVersion;
         row.Reading = true;
         try
@@ -432,12 +549,18 @@ sealed class HeatingWidget : Form
             row.Reading = false;
             if (!row.IsDisposed) { row.Display(); Render(); }
         }
+        if (row.RefreshQueued && !row.IsDisposed)
+        {
+            row.RefreshQueued = false;
+            await RefreshRow(row, settings);
+        }
     }
 
     async Task Step(ThermostatRow row, int direction)
     {
         var settings = connection();
         if (busy || settings == null || !(direction < 0 ? row.Minus.Enabled : row.Plus.Enabled)) return;
+        if (cover) { await MoveCover(row, settings, direction); return; }
         var data = row.Current.attributes;
         decimal step = data.target_temp_step.GetValueOrDefault() > 0 ? data.target_temp_step.Value : 0.5m;
         decimal start = row.DesiredTemperature ?? data.temperature.Value;
@@ -492,6 +615,114 @@ sealed class HeatingWidget : Form
         if (failed) await RefreshRow(row, settings);
     }
 
+    internal static int InvertCoverPosition(int value)
+    {
+        return 100 - Math.Max(0, Math.Min(100, value));
+    }
+
+    bool CanSetCoverPosition(ThermostatRow row)
+    {
+        var state = row.Current;
+        return !busy && !row.IsDisposed && !row.Pending && state != null && state.attributes != null &&
+            state.state != "unknown" && state.state != "unavailable" && (state.attributes.supported_features & 4) != 0;
+    }
+
+    void BeginCoverEdit(ThermostatRow row)
+    {
+        if (!CanSetCoverPosition(row))
+        {
+            SetStatus("Positionsvorgabe nicht verfügbar.");
+            return;
+        }
+        var state = row.Current;
+        editingCover = row;
+        positionInput = InvertCoverPosition(state.attributes.current_position ??
+            (state.state == "closed" ? 0 : 100)).ToString(CultureInfo.InvariantCulture);
+        selectPosition = true;
+        Activate();
+        Render();
+    }
+
+    void CancelCoverEdit()
+    {
+        if (editingCover == null) return;
+        editingCover = null;
+        Render();
+    }
+
+    protected override bool ProcessCmdKey(ref Message message, Keys keyData)
+    {
+        if (editingCover == null) return base.ProcessCmdKey(ref message, keyData);
+        if (keyData == Keys.Escape) { CancelCoverEdit(); return true; }
+        if (keyData == Keys.Enter) { CommitPosition(); return true; }
+        if (keyData == (Keys.Control | Keys.A)) { selectPosition = true; Render(); return true; }
+        if (keyData == Keys.Back || keyData == Keys.Delete)
+        {
+            positionInput = selectPosition || keyData == Keys.Delete || positionInput.Length == 0
+                ? "" : positionInput.Substring(0, positionInput.Length - 1);
+            selectPosition = false;
+            SetStatus("");
+            return true;
+        }
+        int digit;
+        if (keyData >= Keys.D0 && keyData <= Keys.D9) digit = keyData - Keys.D0;
+        else if (keyData >= Keys.NumPad0 && keyData <= Keys.NumPad9) digit = keyData - Keys.NumPad0;
+        else return base.ProcessCmdKey(ref message, keyData);
+        if (selectPosition) positionInput = "";
+        if (positionInput.Length < 3) positionInput += digit.ToString(CultureInfo.InvariantCulture);
+        selectPosition = false;
+        SetStatus("");
+        return true;
+    }
+
+    async void CommitPosition()
+    {
+        var row = editingCover;
+        int value;
+        if (!int.TryParse(positionInput, out value) || value < 0 || value > 100)
+        {
+            selectPosition = true;
+            SetStatus("Bitte 0 bis 100 eingeben.");
+            return;
+        }
+        CancelCoverEdit();
+        var settings = connection();
+        if (settings == null || !CanSetCoverPosition(row)) return;
+        await SendCover(row, settings, "set_cover_position",
+            new { entity_id = row.Entity, position = InvertCoverPosition(value) });
+    }
+
+    Task MoveCover(ThermostatRow row, Settings settings, int direction)
+    {
+        return SendCover(row, settings, direction > 0 ? "open_cover" : "close_cover", new { entity_id = row.Entity });
+    }
+
+    async Task SendCover(ThermostatRow row, Settings settings, string action, object payload)
+    {
+        row.Pending = true;
+        row.ChangeVersion++;
+        row.Display();
+        Render();
+        bool failed = false;
+        try
+        {
+            using (var request = new HttpRequestMessage(HttpMethod.Post,
+                settings.Url.TrimEnd('/') + "/api/services/cover/" + action))
+            {
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.ReadToken());
+                request.Content = new StringContent(new JavaScriptSerializer().Serialize(payload),
+                    System.Text.Encoding.UTF8, "application/json");
+                using (var response = await client.SendAsync(request)) response.EnsureSuccessStatusCode();
+            }
+        }
+        catch (Exception) { failed = true; }
+        finally { row.Pending = false; }
+        if (IsDisposed || row.IsDisposed) return;
+        row.Display();
+        SetStatus(failed ? "Rollladen konnte nicht gesteuert werden." : "");
+        await RefreshRow(row, settings, true);
+    }
+
     public sealed class HeatingSettings
     {
         public string[] Entities { get; set; }
@@ -519,5 +750,6 @@ sealed class HeatingWidget : Form
         public decimal? max_temp { get; set; }
         public decimal? target_temp_step { get; set; }
         public int supported_features { get; set; }
+        public int? current_position { get; set; }
     }
 }

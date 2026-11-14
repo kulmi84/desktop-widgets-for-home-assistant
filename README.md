@@ -8,6 +8,8 @@ Unabhängige Windows-App für Home Assistant. Die Widgets liegen frei positionie
 
 - **Heizung** zeigt Ist- und Solltemperatur von Home-Assistant-Thermostaten und ändert die Solltemperatur auf ausdrücklichen Klick.
 
+- **Rollläden** öffnen und schließen per Pfeiltaste. Die Zahl in der Mitte zeigt den Schließgrad. Bei Geräten mit Positionsvorgabe lässt sich dort direkt ein Wert von 0 bis 100 eingeben und mit Enter bestätigen.
+
 Sensoren lassen sich aus Home Assistant auswählen. Die Widgets bieten eine Live-Vorschau für Schrift, Farben, Transparenz, Symbolgröße und Abstände. Namen, Reihenfolge und Positionen werden lokal gespeichert.
 
 ## Screenshots
@@ -24,11 +26,13 @@ Alle Anzeigen verwenden Beispieldaten.
 
 ![Heizungs-Widget mit Isttemperatur und Plus- und Minus-Tasten](docs/screenshots/04-heizung.png)
 
+![Rollladen-Widget mit Hoch- und Runter-Tasten sowie Schließgrad](docs/screenshots/05-rolllaeden.png)
+
 ## Bauen und starten
 
 Unter Windows **Build.cmd** ausführen. Das Skript verwendet den .NET-Framework-Compiler und erzeugt **SolarKachel.exe** sowie **SolarKachel-Setup.exe**. Der Installer richtet die App im aktuellen Windows-Konto ein. Die Programmdatei kann auch direkt gestartet werden.
 
-In den Einstellungen die eigene Home-Assistant-Adresse und einen langlebigen Zugriffstoken eintragen. Die App ruft Zustände über die [Home-Assistant-REST-API](https://contributors.home-assistant.io/core/internals/rest-api/#states) ab. Die Abfrage läuft alle 15 Sekunden. Der Token wird lokal mit Windows DPAPI verschlüsselt.
+In den Einstellungen die eigene Home-Assistant-Adresse und einen langlebigen Zugriffstoken eintragen. Die App ruft Zustände über die [Home-Assistant-REST-API](https://contributors.home-assistant.io/core/internals/rest-api/#states) ab. Eine gemeinsame WebSocket-Verbindung meldet Zustandsänderungen sofort. Bei Verbindungsproblemen läuft die regelmäßige Abfrage alle 15 Sekunden weiter. Der Token wird lokal mit Windows DPAPI verschlüsselt.
 
 ## Symbole
 

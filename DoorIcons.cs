@@ -21,6 +21,15 @@ static class DoorIcons
         using (var brush = new System.Drawing.SolidBrush(color)) graphics.FillPath(brush, HeatWave);
     }
 
+    internal static void DrawCover(Graphics graphics, System.Drawing.Color color)
+    {
+        using (var pen = new System.Drawing.Pen(color, 2f))
+        {
+            graphics.DrawRectangle(pen, 5, 6, 22, 21);
+            for (int y = 10; y <= 22; y += 4) graphics.DrawLine(pen, 5, y, 27, y);
+        }
+    }
+
     static GraphicsPath Parse(string data)
     {
         var geometry = Geometry.Parse(data).GetFlattenedPathGeometry(0.05, ToleranceType.Absolute);
