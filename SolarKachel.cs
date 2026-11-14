@@ -118,7 +118,7 @@ sealed class Options : Form
     internal Appearance SelectedAppearance { get; private set; }
 
     internal Options(Settings previous, string[] values, Appearance doorStyle = null, Appearance solarStyle = null,
-        DoorWidget.DoorEditor doorEditor = null, Func<string, Appearance> copyFrom = null)
+        DoorWidget.DoorEditor doorEditor = null)
     {
         this.previous = previous;
         Icon = WidgetIcon.Load();
@@ -128,12 +128,12 @@ sealed class Options : Form
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MaximizeBox = MinimizeBox = ShowInTaskbar = false;
-        ClientSize = new Size(876, 470);
+        ClientSize = new Size(876, 498);
         BackColor = Surface;
         ForeColor = Color.WhiteSmoke;
         var darkTitleBar = 1;
         DwmSetWindowAttribute(Handle, 20, ref darkTitleBar, sizeof(int));
-        design.Bounds = new Rectangle(12, 10, 395, 318);
+        design.Bounds = new Rectangle(12, 10, 395, 346);
         connection.Bounds = new Rectangle(417, 10, 447, 318);
         design.ForeColor = connection.ForeColor = ForeColor;
         Controls.AddRange(new Control[] { design, connection });
@@ -176,7 +176,7 @@ sealed class Options : Form
         fontArrow.Click += delegate { typeface.Focus(); typeface.DroppedDown = true; };
         design.Controls.Add(fontArrow);
         fontArrow.BringToFront();
-        var reset = new Button { Text = "Standard wiederherstellen", AutoSize = true, Location = new Point(14, 428) };
+        var reset = new Button { Text = "Standard wiederherstellen", AutoSize = true, Location = new Point(14, 456) };
         reset.Click += delegate
         {
             var defaults = new Appearance();
@@ -193,7 +193,7 @@ sealed class Options : Form
         StyleButton(reset);
         Controls.Add(reset);
         var versionLabel = new Label { Text = ReleaseVersion.Display, ForeColor = Color.Silver,
-            AutoSize = true, Location = new Point(228, 434) };
+            AutoSize = true, Location = new Point(228, 462) };
         Controls.Add(versionLabel);
         address = AddField("HA-Adresse", previous == null ? "http://homeassistant.local:8123" : previous.Url, 24);
         token = AddField(previous == null ? "Zugriffstoken" : "Zugriffstoken (optional)", "", 60);
@@ -206,14 +206,18 @@ sealed class Options : Form
             entities[i] = AddField(labels[i], (previous == null ? Settings.Defaults : previous.Entities)[i], 110 + i * 36, i == 1 ? "%" : "W");
         gridExport = AddField("Netzeinspeisung (optional)",
             previous == null ? "sensor.export_power" : previous.GridExportEntity ?? "", 254, "W");
-        var save = new Button { Text = "Speichern", Bounds = new Rectangle(764, 428, 100, 30) };
-        var cancel = new Button { Text = "Abbrechen", Bounds = new Rectangle(656, 428, 100, 30), DialogResult = DialogResult.Cancel };
+        var save = new Button { Text = "Speichern", Bounds = new Rectangle(764, 456, 100, 30) };
+        var cancel = new Button { Text = "Abbrechen", Bounds = new Rectangle(656, 456, 100, 30), DialogResult = DialogResult.Cancel };
         StyleButton(save);
         StyleButton(cancel);
-        if (doorStyle == null) save.Click += Save;
+        if (doorStyle == null)
+        {
+            save.Click += Save;
+            AddCopyMenu(design, new Point(14, 310), "Solar", null, ApplyStyle);
+        }
         Controls.AddRange(new Control[] { save, cancel });
         var previewGroup = new GroupBox { Text = "Live-Vorschau", ForeColor = ForeColor,
-            Bounds = new Rectangle(12, 334, 852, 86) };
+            Bounds = new Rectangle(12, 362, 852, 86) };
         var preview = new PreviewPanel(ReadAppearance, values) { Bounds = new Rectangle(10, 20, 832, 56) };
         previewGroup.Controls.Add(preview);
         Controls.Add(previewGroup);
@@ -224,8 +228,9 @@ sealed class Options : Form
         typeface.SelectedIndexChanged += delegate { preview.Invalidate(); };
         if (doorStyle != null)
         {
-            Text = (doorEditor.Switches ? DoorWidget.SwitchTitle : DoorWidget.DoorTitle) + " – Einstellungen";
+            Text = (doorEditor.Heating ? HeatingWidget.Title : doorEditor.Switches ? DoorWidget.SwitchTitle : DoorWidget.DoorTitle) + " – Einstellungen";
             ClientSize = new Size(1090, 554);
+            design.Height = 318;
             connection.Width = 661;
             previewGroup.Bounds = new Rectangle(12, 334, 1066, 170);
             preview.Bounds = new Rectangle(10, 20, 1046, 140);
@@ -234,43 +239,27 @@ sealed class Options : Form
             reset.Top = 512;
             versionLabel.Top = 518;
             foreach (var control in connection.Controls.Cast<Control>().ToArray()) control.Dispose();
-            connection.Text = doorEditor.Switches ? "Schalter und Sensoren" : DoorWidget.DoorTitle;
+            connection.Text = doorEditor.Heating ? "Thermostate" : doorEditor.Switches ? "Schalter und Sensoren" : DoorWidget.DoorTitle;
             doorEditor.Bounds = new Rectangle(8, 22, 645, 220);
             connection.Controls.Add(doorEditor);
             var sample = AddColor(doorEditor.Switches ? "Icon-Farbe bei Ein" : "Icon-Farbe bei offener Tür", appearance.OpenIconColor, 247, connection);
             var showOpen = new CheckBox { Text = doorEditor.Switches ? "Ein-Zustand in Vorschau anzeigen" : "Offene Kontakte in Vorschau anzeigen", AutoSize = true,
                 Location = new Point(doorEditor.Switches ? 160 : 16, 284) };
             connection.Controls.Add(showOpen);
+            if (doorEditor.Heating) { showOpen.Hide(); sample.Hide(); connection.Controls[connection.Controls.IndexOf(sample) - 1].Hide(); }
             var vertical = new CheckBox { Text = "Untereinander", AutoSize = true,
                 Location = new Point(16, 284), Checked = appearance.Vertical };
             if (doorEditor.Switches) connection.Controls.Add(vertical);
             vertical.CheckedChanged += delegate { preview.Invalidate(); };
             reset.Click += delegate { vertical.Checked = false; };
-            var copy = new Button { Text = "Ansicht von Widget übernehmen", AutoSize = true, Location = new Point(420, 278) };
-            StyleButton(copy);
-            connection.Controls.Add(copy);
-            var sources = new WidgetMenu();
-            copy.Disposed += delegate { sources.Dispose(); };
-            Action<Appearance> apply = source =>
-            {
-                source = source ?? new Appearance();
-                background.BackColor = Color.FromArgb(source.Background);
-                textColor.BackColor = Color.FromArgb(source.Text);
-                iconColor.BackColor = Color.FromArgb(source.Icons);
-                opacity.Value = source.BackgroundOpacity;
-                textSize.Value = source.TextSize;
-                typeface.SelectedItem = source.Typeface;
-                iconSize.Value = source.IconSize;
-                spacing.Value = source.MetricSpacing;
-                padding.Value = source.FramePadding;
-            };
-            sources.Items.Add("Solar", null, delegate { apply(solarStyle); });
-            if (copyFrom != null)
-            {
-                string other = doorEditor.Switches ? DoorWidget.DoorTitle : DoorWidget.SwitchTitle;
-                sources.Items.Add(other, null, delegate { apply(copyFrom(other)); });
-            }
-            copy.Click += delegate { sources.Show(copy, 0, copy.Height); };
+            AddCopyMenu(connection, new Point(420, 278),
+                doorEditor.Heating ? HeatingWidget.Title : doorEditor.Switches ? DoorWidget.SwitchTitle : DoorWidget.DoorTitle,
+                solarStyle, source =>
+                {
+                    ApplyStyle(source);
+                    sample.BackColor = Color.FromArgb(source.OpenIconColor);
+                    vertical.Checked = source.Vertical;
+                });
             reset.Click += delegate { sample.BackColor = Color.FromArgb(new Appearance().OpenIconColor); };
             preview.Tile = scale =>
             {
@@ -278,6 +267,7 @@ sealed class Options : Form
                 style.OpenIconColor = sample.BackColor.ToArgb();
                 style.Vertical = vertical.Checked;
                 var rows = doorEditor.ReadRows();
+                if (doorEditor.Heating) return HeatingWidget.Preview(style, rows, scale);
                 if (rows.Length == 0) rows = new[] { doorEditor.Switches
                     ? new Door { Name = "Lampe", Open = "Ein", Closed = "Aus", IconKind = "Schalter" }
                     : new Door { Name = "Haustür", Open = "Offen", Closed = "Geschlossen" } };
@@ -299,6 +289,43 @@ sealed class Options : Form
         }
         AcceptButton = save;
         CancelButton = cancel;
+    }
+
+    void ApplyStyle(Appearance source)
+    {
+        background.BackColor = Color.FromArgb(source.Background);
+        textColor.BackColor = Color.FromArgb(source.Text);
+        iconColor.BackColor = Color.FromArgb(source.Icons);
+        opacity.Value = source.BackgroundOpacity;
+        textSize.Value = source.TextSize;
+        typeface.SelectedItem = source.Typeface;
+        if (typeface.SelectedIndex < 0) typeface.SelectedItem = "Segoe UI";
+        iconSize.Value = source.IconSize;
+        spacing.Value = source.MetricSpacing;
+        padding.Value = source.FramePadding;
+    }
+
+    void AddCopyMenu(Control parent, Point location, string current, Appearance solar, Action<Appearance> apply)
+    {
+        var button = new Button { Text = "Ansicht von Widget übernehmen", AutoSize = true, Location = location };
+        StyleButton(button);
+        parent.Controls.Add(button);
+        var menu = new WidgetMenu();
+        button.Disposed += delegate { menu.Dispose(); };
+        foreach (string name in new[] { "Solar", DoorWidget.DoorTitle, DoorWidget.SwitchTitle, HeatingWidget.Title })
+        {
+            if (name == current) continue;
+            string source = name;
+            menu.Items.Add(source, null, delegate
+            {
+                Appearance saved = source == "Solar" ? solar : source == HeatingWidget.Title
+                    ? HeatingWidget.SavedStyle() : DoorWidget.SavedStyle(source == DoorWidget.SwitchTitle);
+                apply(saved ?? (source == HeatingWidget.Title
+                    ? new Appearance { IconSize = 28, MetricSpacing = 0, FramePadding = 10 }
+                    : new Appearance()));
+            });
+        }
+        button.Click += delegate { menu.Show(button, 0, button.Height); };
     }
 
     TextBox AddField(string caption, string value, int top, string unit = null)
@@ -568,7 +595,7 @@ sealed class Options : Form
             DwmSetWindowAttribute(Handle, 20, ref dark, sizeof(int));
 
             var matches = (sensors ?? new SolarTile.Sensor[0]).Where(sensor => sensor != null &&
-                sensor.entity_id != null && sensor.attributes != null && (unit == "switch" ? DoorWidget.IsSwitchEntity(sensor.entity_id) : unit == null
+                sensor.entity_id != null && sensor.attributes != null && (unit == "climate" ? HeatingWidget.IsClimate(sensor.entity_id) : unit == "switch" ? DoorWidget.IsSwitchEntity(sensor.entity_id) : unit == null
                     ? (sensor.entity_id.StartsWith("binary_sensor.", StringComparison.Ordinal) &&
                         new[] { "door", "garage_door", "opening", "window" }.Contains(sensor.attributes.device_class)) ||
                         sensor.entity_id.StartsWith("cover.", StringComparison.Ordinal)
@@ -665,6 +692,7 @@ sealed class SolarTile : Form
     readonly NotifyIcon tray;
     DoorWidget doors;
     DoorWidget switches;
+    HeatingWidget heating;
     bool exiting;
     readonly ContextMenuStrip trayMenu = new WidgetMenu();
     static readonly string WidgetsFile = Path.Combine(
@@ -704,7 +732,7 @@ sealed class SolarTile : Form
             timer.Tick += async delegate { await RefreshValues(); };
         }
         var pin = new ToolStripMenuItem("Immer im Vordergrund") { CheckOnClick = true };
-        pin.CheckedChanged += delegate { TopMost = pin.Checked; if (doors != null) doors.TopMost = TopMost; if (switches != null) switches.TopMost = TopMost; };
+        pin.CheckedChanged += delegate { TopMost = pin.Checked; if (doors != null) doors.TopMost = TopMost; if (switches != null) switches.TopMost = TopMost; if (heating != null) heating.TopMost = TopMost; };
         menu.Items.Add(pin);
         menu.Items.Add("Schließen", null, delegate
         {
@@ -725,6 +753,7 @@ sealed class SolarTile : Form
             addWidget.DropDownItems.Add("Solar", null, delegate { OpenSolar(); });
             addWidget.DropDownItems.Add(DoorWidget.DoorTitle, null, delegate { ShowDoors(); });
             addWidget.DropDownItems.Add(DoorWidget.SwitchTitle, null, delegate { ShowDoors(switchWidget: true); });
+            addWidget.DropDownItems.Add(HeatingWidget.Title, null, delegate { ShowHeating(); });
             trayMenu.Items.Add(addWidget);
             trayMenu.Items.Add("Einstellungen", null, delegate { Configure(); });
             trayMenu.Items.Add("Programm beenden", null, delegate { ExitWidgets(); });
@@ -755,6 +784,7 @@ sealed class SolarTile : Form
         if (active.Contains("solar")) Show();
         if (active.Contains("doors")) ShowDoors(remember: false);
         if (active.Contains("switches")) ShowDoors(remember: false, switchWidget: true);
+        if (active.Contains("heating")) ShowHeating(false);
     }
 
     void RememberWidgets()
@@ -766,7 +796,7 @@ sealed class SolarTile : Form
             string temp = WidgetsFile + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
-                File.WriteAllLines(temp, new[] { Visible ? "solar" : "", doors != null ? "doors" : "", switches != null ? "switches" : "" });
+                File.WriteAllLines(temp, new[] { Visible ? "solar" : "", doors != null && doors.Visible ? "doors" : "", switches != null && switches.Visible ? "switches" : "", heating != null && heating.Visible ? "heating" : "" });
                 if (File.Exists(WidgetsFile)) File.Replace(temp, WidgetsFile, null);
                 else File.Move(temp, WidgetsFile);
             }
@@ -792,9 +822,14 @@ sealed class SolarTile : Form
     {
         if (settings == null && !Configure()) return;
         var existing = switchWidget ? switches : doors;
-        if (existing != null) { existing.Activate(); return; }
-        var widget = new DoorWidget(() => settings, TopMost, switchWidget,
-            name => DoorWidget.SavedStyle(name == DoorWidget.SwitchTitle));
+        if (existing != null)
+        {
+            existing.Show();
+            existing.Activate();
+            if (remember) RememberWidgets();
+            return;
+        }
+        var widget = new DoorWidget(() => settings, TopMost, switchWidget);
         if (switchWidget) switches = widget;
         else doors = widget;
         widget.FormClosed += delegate
@@ -804,6 +839,21 @@ sealed class SolarTile : Form
             RememberWidgets();
         };
         widget.Show();
+        widget.VisibleChanged += delegate { if (!widget.Visible) RememberWidgets(); };
+        if (remember) RememberWidgets();
+    }
+
+    void ShowHeating(bool remember = true)
+    {
+        if (settings == null && !Configure()) return;
+        if (heating == null)
+        {
+            heating = new HeatingWidget(() => settings) { TopMost = TopMost };
+            heating.FormClosed += delegate { heating = null; RememberWidgets(); };
+            heating.VisibleChanged += delegate { if (!heating.Visible) RememberWidgets(); };
+        }
+        heating.Show();
+        heating.Activate();
         if (remember) RememberWidgets();
     }
 
@@ -812,6 +862,7 @@ sealed class SolarTile : Form
         exiting = true;
         if (doors != null) doors.Close();
         if (switches != null) switches.Close();
+        if (heating != null) heating.Close();
         Close();
         Application.ExitThread();
     }
@@ -821,6 +872,7 @@ sealed class SolarTile : Form
         exiting = true;
         if (doors != null) doors.Close();
         if (switches != null) switches.Close();
+        if (heating != null) heating.Close();
         if (!demo) Application.ExitThread();
         base.OnFormClosing(args);
     }
@@ -951,7 +1003,9 @@ sealed class SolarTile : Form
                     g.PixelOffsetMode = PixelOffsetMode.None;
                     g.TextRenderingHint = opacity == 100
                         ? System.Drawing.Text.TextRenderingHint.ClearTypeGridFit
-                        : System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+                        : opacity == 0
+                            ? System.Drawing.Text.TextRenderingHint.SingleBitPerPixelGridFit
+                            : System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
                     g.DrawString(captions[i], namesOnly ? valueFont : labelFont, text, textLeft, (float)Math.Round(top), StringFormat.GenericTypographic);
                     if (!namesOnly) g.DrawString(values[i], valueFont, text, textLeft, (float)Math.Round(top + labelHeight + 2 * scale),
                         StringFormat.GenericTypographic);
@@ -1229,6 +1283,13 @@ sealed class SolarTile : Form
                 using (var doorWidget = new DoorWidget(() => null, false)) { }
                 using (var doorOptions = new Options(null, new[] { "Zu" }, new Appearance(), new Appearance(),
                     new DoorWidget.DoorEditor(new[] { new Door { Name = "Testtür", Open = "Auf", Closed = "Zu" } }, () => null))) { }
+                using (var thermostat = new HeatingWidget(() => null)) { }
+                var heatStyle = new Appearance();
+                using (var heatOptions = new Options(null, new string[0], heatStyle, heatStyle,
+                    new DoorWidget.DoorEditor(new Door[0], () => null, heating: true))) { }
+                using (var heatPreview = HeatingWidget.Preview(heatStyle, new Door[0], 1))
+                    if (heatPreview.Width < 100 || heatPreview.GetPixel(0, 0).A != 0) return 1;
+                if (!HeatingWidget.IsClimate("climate.wohnzimmer") || HeatingWidget.IsClimate("sensor.temperatur")) return 1;
                 var lamp = new Door { Name = "Lampe", IconKind = "Schalter", Open = "Ein", Closed = "Aus" };
                 using (var options = new Options(null, new string[0], new Appearance(), new Appearance(),
                     new DoorWidget.DoorEditor(new[] { lamp }, () => null, true))) { }

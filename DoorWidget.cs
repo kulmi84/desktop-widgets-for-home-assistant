@@ -68,7 +68,6 @@ sealed class DoorWidget : Form
     internal const string SwitchTitle = "Schalter";
     readonly string configPath;
     readonly bool switches;
-    readonly Func<string, Appearance> copyFrom;
     internal static string ConfigPath(bool switches)
     {
         return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -118,12 +117,10 @@ sealed class DoorWidget : Form
         catch (Exception) { return false; }
     }
 
-    internal DoorWidget(Func<Settings> connection, bool topMost, bool switches = false,
-        Func<string, Appearance> copyFrom = null)
+    internal DoorWidget(Func<Settings> connection, bool topMost, bool switches = false)
     {
         this.connection = connection;
         this.switches = switches;
-        this.copyFrom = copyFrom;
         configPath = ConfigPath(switches);
         Text = switches ? SwitchTitle : DoorTitle;
         Icon = WidgetIcon.Load();
@@ -136,7 +133,7 @@ sealed class DoorWidget : Form
         var menu = new WidgetMenu();
         menu.Items.Add(switches ? "Schalter bearbeiten…" : "Sensoren bearbeiten…", null, delegate { EditDoors(); });
         menu.Items.Add("Aktualisieren", null, async delegate { await RefreshDoors(); });
-        menu.Items.Add("Schließen", null, delegate { Close(); });
+        menu.Items.Add("Schließen", null, delegate { Hide(); });
         ContextMenuStrip = menu;
         try
         {
@@ -145,6 +142,12 @@ sealed class DoorWidget : Form
         }
         catch (Exception) { }
         if (config.Doors == null) config.Doors = new Door[0];
+        VisibleChanged += async delegate
+        {
+            if (!Visible) { timer.Stop(); return; }
+            timer.Start();
+            await RefreshDoors();
+        };
         if (config.Position != null)
         {
             Point point = new Point(config.Position.X, config.Position.Y);
@@ -165,7 +168,6 @@ sealed class DoorWidget : Form
                     Math.Max(area.Top, Math.Min(point.Y, area.Bottom - Height)));
             }
             else if (Owner != null) Location = new Point(Owner.Left, Owner.Bottom + 10);
-            timer.Start();
             if (config.Doors.Length == 0) EditDoors();
             else await RefreshDoors();
         };
@@ -267,7 +269,7 @@ sealed class DoorWidget : Form
         var settings = connection();
         var editor = new DoorEditor(config.Doors, connection, switches);
         using (var dialog = new Options(settings, new string[0], config.Appearance ?? new Appearance(),
-            settings == null ? null : settings.Appearance, editor, copyFrom))
+            settings == null ? null : settings.Appearance, editor))
         {
             if (dialog.ShowDialog(this) != DialogResult.OK) return;
             try { Save(editor.Doors, dialog.SelectedAppearance); }
@@ -323,7 +325,7 @@ sealed class DoorWidget : Form
 
     async Task RefreshDoors()
     {
-        if (loading || switching || IsDisposed || config.Doors.Length == 0) return;
+        if (loading || switching || IsDisposed || !Visible || config.Doors.Length == 0) return;
         var doors = config.Doors;
         var settings = connection();
         if (settings == null) return;
@@ -368,8 +370,10 @@ sealed class DoorWidget : Form
         internal event EventHandler RowsChanged;
 
         internal readonly bool Switches;
-        internal DoorEditor(Door[] doors, Func<Settings> connection, bool switches = false)
+        internal readonly bool Heating;
+        internal DoorEditor(Door[] doors, Func<Settings> connection, bool switches = false, bool heating = false)
         {
+            Heating = heating;
             this.connection = connection;
             Switches = switches;
             Font = new Font("Segoe UI", 10);
@@ -416,6 +420,7 @@ sealed class DoorWidget : Form
                     picker.DroppedDown = true;
                 }
             };
+            if (heating) { grid.Columns[2].Visible = false; grid.Columns[3].Visible = false; icons.Visible = false; }
             foreach (DataGridViewColumn column in grid.Columns) column.SortMode = DataGridViewColumnSortMode.NotSortable;
             foreach (var door in doors)
                 grid.Rows.Add(door.Entity, door.Name, door.Open, door.Closed, switches ? "Schalter" : door.IconKind ?? "Automatisch");
@@ -423,8 +428,8 @@ sealed class DoorWidget : Form
             var add = Button("Sensor auswählen…", 0, 151);
             var manual = Button("Manuell hinzufügen", 157, 150);
             var remove = Button("Entfernen", 313, 86);
-            var up = Button("↑ Nach links", 405, 109);
-            var down = Button("↓ Nach rechts", 520, 124);
+            var up = Button(heating ? "↑ Nach oben" : "↑ Nach links", 405, 109);
+            var down = Button(heating ? "↓ Nach unten" : "↓ Nach rechts", 520, 124);
             add.Click += async delegate { await SelectDoor(add); };
             manual.Click += delegate { grid.Rows.Add("", "", Switches ? "Ein" : "Offen", Switches ? "Aus" : "Geschlossen", Switches ? "Schalter" : "Automatisch"); };
             remove.Click += delegate { if (grid.CurrentRow != null) grid.Rows.Remove(grid.CurrentRow); };
@@ -477,7 +482,7 @@ sealed class DoorWidget : Form
                 if (settings == null) throw new ArgumentException("Bitte zuerst Home Assistant einrichten.");
                 var sensors = await Options.LoadSensors(new Uri(settings.Url), settings.ReadToken());
                 if (IsDisposed) return;
-                using (var picker = new Options.SensorPicker(sensors, Switches ? "switch" : null, ""))
+                using (var picker = new Options.SensorPicker(sensors, Heating ? "climate" : Switches ? "switch" : null, ""))
                 {
                     if (picker.ShowDialog(this) != DialogResult.OK) return;
                     var sensor = picker.Selection;
@@ -508,8 +513,8 @@ sealed class DoorWidget : Form
         {
             grid.EndEdit();
             var doors = ReadRows();
-            if (doors.Any(door => !(Switches ? IsSwitchEntity(door.Entity) : Regex.IsMatch(door.Entity, @"^(binary_sensor|cover)\.[a-z0-9_]+$")) ||
-                door.Name.Length == 0 || door.Open.Length == 0 || door.Closed.Length == 0))
+            if (doors.Any(door => !(Heating ? HeatingWidget.IsClimate(door.Entity) : Switches ? IsSwitchEntity(door.Entity) : Regex.IsMatch(door.Entity, @"^(binary_sensor|cover)\.[a-z0-9_]+$")) ||
+                door.Name.Length == 0 || (!Heating && (door.Open.Length == 0 || door.Closed.Length == 0))))
             {
                 MessageBox.Show(this, "Bitte pro Sensor eine gültige Entitäts-ID, einen Namen und beide Statustexte eintragen.", Switches ? SwitchTitle : DoorTitle);
                 return false;

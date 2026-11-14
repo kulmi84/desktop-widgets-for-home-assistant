@@ -1,5 +1,5 @@
 Material Design Icons by Pictogrammers
 https://github.com/Templarian/MaterialDesign
-Icons: garage, garage-open, door-closed, door-open, window-closed, window-open
+Icons: garage, garage-open, door-closed, door-open, window-closed, window-open, heat-wave
 Original SVG paths embedded in DoorIcons.cs and converted to drawing paths at runtime.
 Licensed under Apache License, Version 2.0.

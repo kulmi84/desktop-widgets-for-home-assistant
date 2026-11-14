@@ -6,6 +6,8 @@ Unabhängige Windows-App für Home Assistant. Die Widgets liegen frei positionie
 - **Fenster-Tür-Sensoren** zeigt Öffnungszustände mit passenden Symbolen für Fenster, Türen und Garagentore.
 - **Schalter** zeigt Ein-/Aus-Zustände und schaltet steuerbare Entitäten per Klick. Die Anzeige kann waagerecht oder senkrecht angeordnet werden.
 
+- **Heizung** zeigt Ist- und Solltemperatur von Home-Assistant-Thermostaten und ändert die Solltemperatur auf ausdrücklichen Klick.
+
 Sensoren lassen sich aus Home Assistant auswählen. Die Widgets bieten eine Live-Vorschau für Schrift, Farben, Transparenz, Symbolgröße und Abstände. Namen, Reihenfolge und Positionen werden lokal gespeichert.
 
 ## Screenshots
@@ -19,6 +21,8 @@ Alle Anzeigen verwenden Beispieldaten.
 **Schalter in senkrechter Anordnung**
 
 ![Drei Schalter mit Ein- und Aus-Zuständen](docs/screenshots/03-schalter.png)
+
+![Heizungs-Widget mit Isttemperatur und Plus- und Minus-Tasten](docs/screenshots/04-heizung.png)
 
 ## Bauen und starten
 
