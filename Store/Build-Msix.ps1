@@ -1,8 +1,9 @@
-﻿param(
+param(
     [Parameter(Mandatory=$true)][string]$IdentityName,
     [Parameter(Mandatory=$true)][string]$Publisher,
     [Parameter(Mandatory=$true)][string]$PublisherDisplayName,
-    [string]$MakeAppx
+    [string]$MakeAppx,
+    [version]$PackageVersion
 )
 $ErrorActionPreference = 'Stop'
 if (!$MakeAppx) {
@@ -18,7 +19,7 @@ Push-Location $root
 try {
     cmd.exe /d /c Build.cmd --store
     if ($LASTEXITCODE) { throw 'Store-Build fehlgeschlagen.' }
-    $exe = Join-Path $root 'DesktopWidgets.Store.exe'
+    $exe = Join-Path $root 'DesktopWidgetsForHomeAssistant.Store.exe'
     $version = [Diagnostics.FileVersionInfo]::GetVersionInfo($exe)
     $out = Join-Path $root 'artifacts'
     [void][IO.Directory]::CreateDirectory($out)
@@ -30,7 +31,9 @@ try {
         [xml]$manifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'AppxManifest.xml') -Raw
         $manifest.Package.Identity.SetAttribute('Name', $IdentityName)
         $manifest.Package.Identity.SetAttribute('Publisher', $Publisher)
-        $manifest.Package.Identity.SetAttribute('Version', $version.FileVersion)
+        $manifest.Package.Identity.SetAttribute('Version', $(if ($PackageVersion) {
+            $PackageVersion.ToString(4)
+        } else { $version.FileVersion }))
         $manifest.Package.Properties.PublisherDisplayName = $PublisherDisplayName
         $manifest.Save((Join-Path $stage 'AppxManifest.xml'))
 
@@ -51,7 +54,7 @@ try {
             } finally { $source.Dispose() }
         } finally { $icon.Dispose() }
 
-        $package = Join-Path $out ("DesktopWidgets-" + $version.FileVersion + ".msix")
+        $package = Join-Path $out ("DesktopWidgets-" + $version.ProductVersion.Replace("+build.", "-Build-") + ".msix")
         & $MakeAppx pack /d $stage /p $package /o
         if ($LASTEXITCODE) { throw 'MSIX-Paketierung fehlgeschlagen.' }
         Get-Item -LiteralPath $package

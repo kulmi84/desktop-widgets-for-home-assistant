@@ -28,6 +28,7 @@ sealed class Appearance
     public bool Vertical { get; set; }
     public bool ValueBesideName { get; set; }
     public int OpenIconColor { get; set; }
+    public HorizontalAnchor HorizontalAnchor { get; set; }
 
     public Appearance()
     {
@@ -96,11 +97,11 @@ sealed class Options : Form
     readonly TextBox[] entities = new TextBox[4];
     readonly Settings previous;
     readonly TextBox gridExport;
-    static readonly Color Surface = Color.FromArgb(24, 24, 26);
-    static readonly Color Input = Color.FromArgb(43, 43, 47);
-    static readonly Color Border = Color.FromArgb(80, 80, 87);
-    readonly GroupBox connection = new GroupBox { Text = "Home Assistant" };
-    readonly GroupBox design = new GroupBox { Text = "Darstellung" };
+    static readonly Color Surface = SettingsTheme.Surface;
+    static readonly Color Input = SettingsTheme.Input;
+    static readonly Color Border = SettingsTheme.Border;
+    readonly GroupBox connection = new SettingsCard { Text = "Home Assistant" };
+    readonly GroupBox design = new SettingsCard { Text = UiText.Get("Darstellung", "Appearance") };
     readonly NumericUpDown iconSize;
     readonly NumericUpDown spacing;
     readonly NumericUpDown padding;
@@ -109,46 +110,47 @@ sealed class Options : Form
     readonly Button iconColor;
     readonly NumericUpDown textSize;
     readonly ComboBox typeface;
+    readonly ComboBox horizontalAnchor;
     readonly NumericUpDown opacity;
     internal Settings Result { get; private set; }
 
     internal Appearance SelectedAppearance { get; private set; }
 
     internal Options(Settings previous, string[] values, Appearance doorStyle = null, Appearance solarStyle = null,
-        DoorWidget.DoorEditor doorEditor = null)
+        DoorWidget.DoorEditor doorEditor = null, bool connectionOnly = false)
     {
         this.previous = previous;
         Icon = WidgetIcon.Load();
-        Text = ReleaseVersion.ProductName + " – Einstellungen";
-        Font = new Font("Segoe UI", 10);
+        Text = ReleaseVersion.ProductName + UiText.Get(" – Einstellungen", " – Settings");
+        Font = new Font("Segoe UI", 9.5f);
         AutoScaleMode = AutoScaleMode.Dpi;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MaximizeBox = MinimizeBox = ShowInTaskbar = false;
-        ClientSize = new Size(876, 498);
+        ClientSize = new Size(876, 531);
         BackColor = Surface;
         ForeColor = Color.WhiteSmoke;
         var darkTitleBar = 1;
         DwmSetWindowAttribute(Handle, 20, ref darkTitleBar, sizeof(int));
-        design.Bounds = new Rectangle(12, 10, 395, 346);
+        design.Bounds = new Rectangle(12, 10, 395, 379);
         connection.Bounds = new Rectangle(417, 10, 447, 318);
         design.ForeColor = connection.ForeColor = ForeColor;
         Controls.AddRange(new Control[] { design, connection });
         var appearance = doorStyle ?? (previous == null ? new Appearance() : previous.Appearance ?? new Appearance());
-        background = AddColor("Hintergrundfarbe", appearance.Background, 23);
-        textColor = AddColor("Schriftfarbe", appearance.Text, 54);
-        iconColor = AddColor("Icon-Farbe", appearance.Icons, 85);
-        opacity = AddNumber("Hintergrund-Deckkraft (%)", appearance.BackgroundOpacity, 0, 100, 116);
-        textSize = AddNumber("Schriftgröße (pt)", appearance.TextSize, 8, 28, 160);
-        design.Controls.Add(new Label { Text = "0 % = transparenter Hintergrund", AutoSize = true,
+        background = AddColor(UiText.Get("Hintergrundfarbe", "Background color"), appearance.Background, 23);
+        textColor = AddColor(UiText.Get("Schriftfarbe", "Text color"), appearance.Text, 54);
+        iconColor = AddColor(UiText.Get("Icon-Farbe", "Icon color"), appearance.Icons, 85);
+        opacity = AddNumber(UiText.Get("Hintergrund-Deckkraft (%)", "Background opacity (%)"), appearance.BackgroundOpacity, 0, 100, 116);
+        textSize = AddNumber(UiText.Get("Schriftgröße (pt)", "Font size (pt)"), appearance.TextSize, 8, 28, 160);
+        design.Controls.Add(new Label { Text = UiText.Get("0 % = transparenter Hintergrund", "0% = transparent background"), AutoSize = true,
             ForeColor = Color.Silver, Location = new Point(14, 142) });
-        iconSize = AddNumber("Icon-Größe (px)", appearance.IconSize, 20, 96, 190);
-        spacing = AddNumber("Abstand zwischen den Anzeigen (px)", appearance.MetricSpacing, 0, 100, 220);
-        padding = AddNumber("Rahmengröße / Innenabstand (px)", appearance.FramePadding, 0, 48, 250);
-        design.Controls.Add(new Label { Text = "Schriftart", AutoSize = true, Location = new Point(14, 285) });
+        iconSize = AddNumber(UiText.Get("Icon-Größe (px)", "Icon size (px)"), appearance.IconSize, 20, 96, 190);
+        spacing = AddNumber(UiText.Get("Abstand zwischen den Anzeigen (px)", "Space between items (px)"), appearance.MetricSpacing, 0, 100, 220);
+        padding = AddNumber(UiText.Get("Rahmengröße / Innenabstand (px)", "Padding (px)"), appearance.FramePadding, 0, 48, 250);
+        design.Controls.Add(new Label { Text = UiText.Get("Schriftart", "Font"), AutoSize = true, Location = new Point(14, 285) });
         typeface = new DarkFontPicker { Bounds = new Rectangle(151, 281, 231, 26),
             DropDownStyle = ComboBoxStyle.DropDownList, Sorted = true,
-            BackColor = Input, ForeColor = ForeColor, FlatStyle = FlatStyle.Flat, AccessibleName = "Schriftart" };
+            BackColor = Input, ForeColor = ForeColor, FlatStyle = FlatStyle.Flat, AccessibleName = UiText.Get("Schriftart", "Font") };
         foreach (var family in FontFamily.Families)
         {
             using (family)
@@ -158,22 +160,18 @@ sealed class Options : Form
         typeface.SelectedItem = appearance.Typeface;
         if (typeface.SelectedIndex < 0) typeface.SelectedItem = "Segoe UI";
         design.Controls.Add(typeface);
-        var fontArrow = DarkArrow("", "Schriftarten öffnen");
-        fontArrow.Paint += delegate(object sender, PaintEventArgs args)
-        {
-            int x = fontArrow.Width / 2, y = fontArrow.Height / 2;
-            using (var pen = new Pen(Color.Silver))
-            {
-                args.Graphics.DrawLine(pen, 0, 2, 0, fontArrow.Height - 3);
-                args.Graphics.DrawLines(pen, new[] { new Point(x - 4, y - 2),
-                    new Point(x, y + 2), new Point(x + 4, y - 2) });
-            }
-        };
-        fontArrow.Bounds = new Rectangle(355, 282, 26, 23);
-        fontArrow.Click += delegate { typeface.Focus(); typeface.DroppedDown = true; };
-        design.Controls.Add(fontArrow);
-        fontArrow.BringToFront();
-        var reset = new Button { Text = "Standard wiederherstellen", AutoSize = true, Location = new Point(14, 456) };
+        AddPickerArrow(typeface, UiText.Get("Schriftarten öffnen", "Open font list"));
+        string anchorCaption = UiText.Get("Breitenänderung", "Width alignment");
+        design.Controls.Add(new Label { Text = anchorCaption, AutoSize = true, Location = new Point(14, 315) });
+        horizontalAnchor = new DarkFontPicker { Bounds = new Rectangle(151, 311, 231, 26),
+            DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Input, ForeColor = ForeColor,
+            FlatStyle = FlatStyle.Flat, AccessibleName = anchorCaption };
+        horizontalAnchor.Items.AddRange(new object[] { UiText.Get("Rechts fest", "Right edge fixed"),
+            UiText.Get("Links fest", "Left edge fixed"), UiText.Get("Mittig", "Centered") });
+        SelectHorizontalAnchor(appearance.HorizontalAnchor);
+        design.Controls.Add(horizontalAnchor);
+        AddPickerArrow(horizontalAnchor, UiText.Get("Ausrichtung auswählen", "Select alignment"));
+        var reset = new SettingsButton { Text = UiText.Get("Standard wiederherstellen", "Restore defaults"), AutoSize = true, Location = new Point(14, 489) };
         reset.Click += delegate
         {
             var defaults = new Appearance();
@@ -186,38 +184,39 @@ sealed class Options : Form
             iconSize.Value = defaults.IconSize;
             spacing.Value = defaults.MetricSpacing;
             padding.Value = defaults.FramePadding;
+            SelectHorizontalAnchor(defaults.HorizontalAnchor);
         };
         StyleButton(reset);
         Controls.Add(reset);
         var versionLabel = new Label { Text = ReleaseVersion.Display, ForeColor = Color.Silver,
-            AutoSize = true, Location = new Point(228, 462) };
+            AutoSize = true, Location = new Point(228, 495) };
         Controls.Add(versionLabel);
-        address = AddField("HA-Adresse", previous == null ? "" : previous.Url, 24);
-        token = AddField(previous == null ? "Zugriffstoken" : "Zugriffstoken (optional)", "", 60);
+        address = AddField(UiText.Get("HA-Adresse", "HA address"), previous == null ? "" : previous.Url, 24);
+        token = AddField(previous == null ? UiText.Get("Zugriffstoken", "Access token") : UiText.Get("Zugriffstoken (optional)", "Access token (optional)"), "", 60);
         token.UseSystemPasswordChar = true;
         if (previous != null)
-            connection.Controls.Add(new Label { Text = "Leer lassen, um den gespeicherten Token zu behalten.",
+            connection.Controls.Add(new Label { Text = UiText.Get("Leer lassen, um den gespeicherten Token zu behalten.", "Leave blank to keep the saved token."),
                 ForeColor = Color.Silver, AutoSize = true, Location = new Point(12, 87) });
         if (previous == null)
-            connection.Controls.Add(new Label { Text = "Solar-Sensoren sind optional.", ForeColor = Color.Silver,
+            connection.Controls.Add(new Label { Text = UiText.Get("Solar-Sensoren sind optional.", "Solar sensors are optional."), ForeColor = Color.Silver,
                 AutoSize = true, Location = new Point(12, 87) });
-        string[] labels = { "Solarerzeugung", "Akkustand", "Hausverbrauch", "Netzleistung / Netzbezug" };
+        string[] labels = { UiText.Get("Solarerzeugung", "Solar generation"), UiText.Get("Akkustand", "Battery level"), UiText.Get("Hausverbrauch", "Home consumption"), UiText.Get("Netzleistung / Netzbezug", "Grid power / import") };
         for (int i = 0; i < 4; i++)
             entities[i] = AddField(labels[i], previous == null ? "" : previous.Entities[i], 110 + i * 36, i == 1 ? "%" : "W");
-        gridExport = AddField("Netzeinspeisung (optional)",
+        gridExport = AddField(UiText.Get("Netzeinspeisung (optional)", "Grid export (optional)"),
             previous == null ? "" : previous.GridExportEntity ?? "", 254, "W");
-        var save = new Button { Text = "Speichern", Bounds = new Rectangle(764, 456, 100, 30) };
-        var cancel = new Button { Text = "Abbrechen", Bounds = new Rectangle(656, 456, 100, 30), DialogResult = DialogResult.Cancel };
+        var save = new SettingsButton { Primary = true, Text = UiText.Get("Speichern", "Save"), Bounds = new Rectangle(764, 489, 100, 30) };
+        var cancel = new SettingsButton { Text = UiText.Get("Abbrechen", "Cancel"), Bounds = new Rectangle(656, 489, 100, 30), DialogResult = DialogResult.Cancel };
         StyleButton(save);
         StyleButton(cancel);
         if (doorStyle == null)
         {
             save.Click += Save;
-            AddCopyMenu(design, new Point(14, 310), "Solar", null, ApplyStyle);
+            AddCopyMenu(design, new Point(14, 341), "Solar", null, ApplyStyle);
         }
         Controls.AddRange(new Control[] { save, cancel });
-        var previewGroup = new GroupBox { Text = "Live-Vorschau", ForeColor = ForeColor,
-            Bounds = new Rectangle(12, 362, 852, 86) };
+        var previewGroup = new SettingsCard { Text = UiText.Get("Live-Vorschau", "Live preview"), ForeColor = ForeColor,
+            Bounds = new Rectangle(12, 395, 852, 86) };
         var preview = new PreviewPanel(ReadAppearance, values) { Bounds = new Rectangle(10, 20, 832, 56) };
         previewGroup.Controls.Add(preview);
         Controls.Add(previewGroup);
@@ -228,30 +227,41 @@ sealed class Options : Form
         typeface.SelectedIndexChanged += delegate { preview.Invalidate(); };
         if (doorStyle != null)
         {
-            Text = (doorEditor.Sensors ? DoorWidget.SensorTitle : doorEditor.Cover ? HeatingWidget.CoverTitle : doorEditor.Heating ? HeatingWidget.Title : doorEditor.Switches ? DoorWidget.SwitchTitle : DoorWidget.DoorTitle) + " – Einstellungen";
-            ClientSize = new Size(1090, 554);
-            design.Height = 318;
+            Text = (doorEditor.Sensors ? DoorWidget.SensorTitle : doorEditor.Cover ? HeatingWidget.CoverTitle : doorEditor.Heating ? HeatingWidget.Title : doorEditor.Switches ? DoorWidget.SwitchTitle : DoorWidget.DoorTitle) + UiText.Get(" – Einstellungen", " – Settings");
+            ClientSize = new Size(1090, 581);
+            design.Height = 345;
             connection.Width = 661;
-            previewGroup.Bounds = new Rectangle(12, 334, 1066, 170);
+            previewGroup.Bounds = new Rectangle(12, 361, 1066, 170);
             preview.Bounds = new Rectangle(10, 20, 1046, 140);
-            save.Location = new Point(978, 512);
-            cancel.Location = new Point(870, 512);
-            reset.Top = 512;
-            versionLabel.Top = 518;
+            save.Location = new Point(978, 539);
+            cancel.Location = new Point(870, 539);
+            reset.Top = 539;
+            versionLabel.Top = 545;
             foreach (var control in connection.Controls.Cast<Control>().ToArray()) control.Dispose();
-            connection.Text = doorEditor.Sensors ? DoorWidget.SensorTitle : doorEditor.Cover ? HeatingWidget.CoverTitle : doorEditor.Heating ? "Thermostate" : doorEditor.Switches ? "Schalter und Sensoren" : DoorWidget.DoorTitle;
+            connection.Text = doorEditor.Sensors ? DoorWidget.SensorTitle : doorEditor.Cover ? HeatingWidget.CoverTitle : doorEditor.Heating ? UiText.Get("Thermostate", "Thermostats") : doorEditor.Switches ? UiText.Get("Schalter und Sensoren", "Switches and sensors") : DoorWidget.DoorTitle;
             doorEditor.Bounds = new Rectangle(8, 22, 645, 220);
             connection.Controls.Add(doorEditor);
-            var sample = AddColor(doorEditor.Switches ? "Icon-Farbe bei Ein" : "Icon-Farbe bei offener Tür", appearance.OpenIconColor, 247, connection);
-            var showOpen = new CheckBox { Text = doorEditor.Switches ? "Ein-Zustand in Vorschau anzeigen" : "Offene Kontakte in Vorschau anzeigen", AutoSize = true,
+            var sample = AddColor(doorEditor.Switches ? UiText.Get("Icon-Farbe bei Ein", "Icon color when on") : UiText.Get("Icon-Farbe bei offener Tür", "Icon color when open"), appearance.OpenIconColor, 247, connection);
+            var showOpen = new CheckBox { Text = doorEditor.Switches ? UiText.Get("Ein-Zustand in Vorschau anzeigen", "Preview the on state") : UiText.Get("Offene Kontakte in Vorschau anzeigen", "Preview open contacts"), AutoSize = true,
                 Location = new Point(doorEditor.Switches ? 160 : 16, 284) };
             connection.Controls.Add(showOpen);
+            CheckBox onlyWhenOpen = null;
+            if (!doorEditor.Switches && !doorEditor.Sensors && !doorEditor.DeviceRows)
+            {
+                onlyWhenOpen = new CheckBox
+                {
+                    Text = UiText.Get("Nur anzeigen, wenn mindestens ein Kontakt offen ist", "Show only when at least one contact is open"),
+                    AutoSize = true, Checked = doorEditor.OnlyWhenOpen, Location = new Point(16, 311)
+                };
+                connection.Controls.Add(onlyWhenOpen);
+                connection.Height += 27;
+            }
             if (doorEditor.DeviceRows || doorEditor.Sensors) { showOpen.Hide(); sample.Hide(); connection.Controls[connection.Controls.IndexOf(sample) - 1].Hide(); }
-            var vertical = new CheckBox { Text = "Untereinander", AutoSize = true,
+            var vertical = new CheckBox { Text = UiText.Get("Untereinander", "Stack vertically"), AutoSize = true,
                 Location = new Point(16, 284), Checked = appearance.Vertical };
             if (doorEditor.Switches || doorEditor.Sensors) connection.Controls.Add(vertical);
             vertical.CheckedChanged += delegate { preview.Invalidate(); };
-            var beside = new CheckBox { Text = "Wert neben Bezeichnung", AutoSize = true,
+            var beside = new CheckBox { Text = UiText.Get("Wert neben Bezeichnung", "Value beside label"), AutoSize = true,
                 Location = new Point(150, 284), Checked = appearance.ValueBesideName };
             if (doorEditor.Sensors) connection.Controls.Add(beside);
             beside.CheckedChanged += delegate { preview.Invalidate(); };
@@ -276,7 +286,7 @@ sealed class Options : Form
                 var rows = doorEditor.ReadRows();
                 if (doorEditor.Sensors)
                 {
-                    if (rows.Length == 0) rows = new[] { new Door { Name = "Außentemperatur", IconKind = "Temperatur" } };
+                    if (rows.Length == 0) rows = new[] { new Door { Name = UiText.Get("Außentemperatur", "Outdoor temperature"), IconKind = "Temperatur" } };
                     var examples = rows.Select(row => DoorWidget.SensorValue(new SolarTile.Sensor {
                         state = "21.357", attributes = new SolarTile.SensorAttributes { unit_of_measurement = row.IconKind == "Temperatur" ? "°C" : row.IconKind == "Luftfeuchtigkeit" ? "%" : "" }
                     }, row.Decimals, row.Unit)).ToArray();
@@ -284,10 +294,10 @@ sealed class Options : Form
                 }
                 if (doorEditor.DeviceRows) return HeatingWidget.Preview(style, rows, scale, doorEditor.Cover);
                 if (rows.Length == 0) rows = new[] { doorEditor.Switches
-                    ? new Door { Name = "Lampe", Open = "Ein", Closed = "Aus", IconKind = "Schalter" }
-                    : new Door { Name = "Haustür", Open = "Offen", Closed = "Geschlossen" } };
+                    ? new Door { Name = UiText.Get("Lampe", "Light"), Open = "Ein", Closed = "Aus", IconKind = "Schalter" }
+                    : new Door { Name = UiText.Get("Haustür", "Front door"), Open = "Offen", Closed = "Geschlossen" } };
                 return DoorWidget.PaintDoors(style, rows.Select(door => door.Name).ToArray(),
-                    rows.Select(door => showOpen.Checked ? door.Open : door.Closed).ToArray(),
+                    rows.Select(door => UiText.Status(showOpen.Checked ? door.Open : door.Closed)).ToArray(),
                     Enumerable.Repeat(showOpen.Checked, rows.Length).ToArray(), scale, 0, rows);
             };
             doorEditor.RowsChanged += delegate { preview.Invalidate(); };
@@ -296,12 +306,27 @@ sealed class Options : Form
             save.Click += delegate
             {
                 if (!doorEditor.SaveRows()) return;
+                if (onlyWhenOpen != null) doorEditor.OnlyWhenOpen = onlyWhenOpen.Checked;
                 SelectedAppearance = ReadAppearance();
                 SelectedAppearance.OpenIconColor = sample.BackColor.ToArgb();
                 SelectedAppearance.Vertical = vertical.Checked;
                 SelectedAppearance.ValueBesideName = doorEditor.Sensors && beside.Checked;
                 DialogResult = DialogResult.OK;
             };
+        }
+        if (connectionOnly)
+        {
+            Text = UiText.Get("Home Assistant – Verbindung", "Home Assistant connection");
+            design.Hide();
+            previewGroup.Hide();
+            reset.Hide();
+            versionLabel.Hide();
+            foreach (Control control in connection.Controls)
+                if (control.Top > 100) control.Hide();
+            connection.Bounds = new Rectangle(12, 10, 447, 115);
+            ClientSize = new Size(471, 176);
+            cancel.Location = new Point(251, 135);
+            save.Location = new Point(359, 135);
         }
         AcceptButton = save;
         CancelButton = cancel;
@@ -319,11 +344,38 @@ sealed class Options : Form
         iconSize.Value = source.IconSize;
         spacing.Value = source.MetricSpacing;
         padding.Value = source.FramePadding;
+        SelectHorizontalAnchor(source.HorizontalAnchor);
+    }
+
+    void SelectHorizontalAnchor(HorizontalAnchor anchor)
+    {
+        int index = (int)anchor;
+        horizontalAnchor.SelectedIndex = index >= 0 && index < horizontalAnchor.Items.Count ? index : 0;
+    }
+
+    void AddPickerArrow(ComboBox picker, string caption)
+    {
+        var arrow = DarkArrow("", caption);
+        arrow.Bounds = new Rectangle(picker.Right - 27, picker.Top + 1, 26, 23);
+        arrow.Paint += delegate(object sender, PaintEventArgs args)
+        {
+            int x = arrow.Width / 2, y = arrow.Height / 2;
+            using (var pen = new Pen(Color.Silver))
+            {
+                args.Graphics.DrawLine(pen, 0, 2, 0, arrow.Height - 3);
+                args.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                args.Graphics.DrawLines(pen, new[] { new Point(x - 4, y - 2),
+                    new Point(x, y + 2), new Point(x + 4, y - 2) });
+            }
+        };
+        arrow.Click += delegate { picker.Focus(); picker.DroppedDown = true; };
+        design.Controls.Add(arrow);
+        arrow.BringToFront();
     }
 
     void AddCopyMenu(Control parent, Point location, string current, Appearance solar, Action<Appearance> apply)
     {
-        var button = new Button { Text = "Ansicht von Widget übernehmen", AutoSize = true, Location = location };
+        var button = new SettingsButton { Text = UiText.Get("Ansicht von Widget übernehmen", "Copy appearance from widget"), AutoSize = true, Location = location };
         StyleButton(button);
         parent.Controls.Add(button);
         var menu = new WidgetMenu();
@@ -341,12 +393,21 @@ sealed class Options : Form
                     : new Appearance()));
             });
         }
-        foreach (var widget in DoorWidget.SensorWidgets())
+        foreach (var widget in DoorWidget.SavedWidgets())
         {
             var id = widget.Key;
-            menu.Items.Add("Sensoren · " + widget.Value, null, delegate
+            menu.Items.Add(UiText.Get("Sensoren · ", "Sensors · ") + widget.Value, null, delegate
             {
-                var saved = DoorWidget.SensorStyle(id);
+                var saved = DoorWidget.SavedInstanceStyle(id);
+                if (saved != null) apply(saved);
+            });
+        }
+        foreach (var widget in DoorWidget.SavedWidgets(true))
+        {
+            var id = widget.Key;
+            menu.Items.Add(UiText.Get("Schalter · ", "Switches · ") + widget.Value, null, delegate
+            {
+                var saved = DoorWidget.SavedInstanceStyle(id, true);
                 if (saved != null) apply(saved);
             });
         }
@@ -361,7 +422,7 @@ sealed class Options : Form
         AddInputFrame(connection, field, new Rectangle(201, top + 2, unit == null ? 233 : 201, 21));
         if (unit != null)
         {
-            var browse = DarkArrow("", "Sensor auswählen: " + caption);
+            var browse = DarkArrow("", UiText.Get("Sensor auswählen: ", "Select sensor: ") + caption);
             browse.Paint += delegate(object sender, PaintEventArgs args)
             {
                 var graphics = args.Graphics;
@@ -445,8 +506,11 @@ sealed class Options : Form
         var frame = new Panel { Bounds = bounds, BackColor = Input, TabStop = false };
         frame.Paint += delegate(object sender, PaintEventArgs args)
         {
-            using (var pen = new Pen(Color.FromArgb(103, 103, 109)))
-                args.Graphics.DrawRectangle(pen, 0, 0, frame.ClientSize.Width - 1, frame.ClientSize.Height - 1);
+            args.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var edge = SettingsTheme.Rounded(new RectangleF(0.5f, 0.5f,
+                frame.ClientSize.Width - 1, frame.ClientSize.Height - 1), 4))
+            using (var pen = new Pen(Border))
+                args.Graphics.DrawPath(pen, edge);
         };
         return frame;
     }
@@ -454,8 +518,8 @@ sealed class Options : Form
     void AddNumberFrame(NumericUpDown field, Rectangle bounds)
     {
         var frame = CreateInputFrame(bounds);
-        var minus = DarkArrow("", "Verringern");
-        var plus = DarkArrow("", "Erhöhen");
+        var minus = DarkArrow("", UiText.Get("Verringern", "Decrease"));
+        var plus = DarkArrow("", UiText.Get("Erhöhen", "Increase"));
         minus.Paint += delegate(object sender, PaintEventArgs args) { DrawStepArrow(minus, args.Graphics, false); };
         plus.Paint += delegate(object sender, PaintEventArgs args) { DrawStepArrow(plus, args.Graphics, true); };
         minus.Click += delegate { field.DownButton(); };
@@ -539,7 +603,8 @@ sealed class Options : Form
             Typeface = typeface.SelectedItem as string ?? "Segoe UI",
             IconSize = (int)iconSize.Value,
             MetricSpacing = (int)spacing.Value,
-            FramePadding = (int)padding.Value
+            FramePadding = (int)padding.Value,
+            HorizontalAnchor = (HorizontalAnchor)horizontalAnchor.SelectedIndex
         };
     }
 
@@ -549,7 +614,7 @@ sealed class Options : Form
         if (!Uri.TryCreate(address.Text.Trim(), UriKind.Absolute, out uri) ||
             (uri.Scheme != "http" && uri.Scheme != "https") ||
             uri.UserInfo.Length != 0 || uri.Query.Length != 0 || uri.Fragment.Length != 0)
-            throw new ArgumentException("Bitte eine gültige HTTP- oder HTTPS-Adresse eingeben.");
+            throw new ArgumentException(UiText.Get("Bitte eine gültige HTTP- oder HTTPS-Adresse eingeben.", "Enter a valid HTTP or HTTPS address."));
         return uri;
     }
 
@@ -568,7 +633,7 @@ sealed class Options : Form
             Uri uri = ReadAddress();
             string accessToken = token.Text.Trim();
             if (accessToken.Length == 0 && CanReuseToken(uri)) accessToken = previous.ReadToken();
-            if (accessToken.Length == 0) throw new ArgumentException("Bitte zuerst einen Zugriffstoken eingeben.");
+            if (accessToken.Length == 0) throw new ArgumentException(UiText.Get("Bitte zuerst einen Zugriffstoken eingeben.", "Enter an access token first."));
 
             var sensors = await LoadSensors(uri, accessToken);
             if (IsDisposed) return;
@@ -576,7 +641,7 @@ sealed class Options : Form
                 if (picker.ShowDialog(this) == DialogResult.OK) target.Text = picker.SelectedEntity;
         }
         catch (ArgumentException ex) { if (!IsDisposed) MessageBox.Show(this, ex.Message, Text); }
-        catch (Exception) { if (!IsDisposed) MessageBox.Show(this, "Sensorliste konnte nicht geladen werden. Bitte Verbindung und Zugriffstoken prüfen.", Text); }
+        catch (Exception) { if (!IsDisposed) MessageBox.Show(this, UiText.Get("Sensorliste konnte nicht geladen werden. Bitte Verbindung und Zugriffstoken prüfen.", "Could not load sensors. Check the connection and access token."), Text); }
         finally
         {
             if (!browse.IsDisposed) { browse.Enabled = true; browse.Invalidate(); }
@@ -592,7 +657,7 @@ sealed class Options : Form
             using (var response = await client.GetAsync(uri.AbsoluteUri.TrimEnd('/') + "/api/states"))
             {
                 if (!response.IsSuccessStatusCode)
-                    throw new ArgumentException("Home Assistant meldet HTTP " + (int)response.StatusCode + ".");
+                    throw new ArgumentException(UiText.Get("Home Assistant meldet HTTP ", "Home Assistant returned HTTP ") + (int)response.StatusCode + ".");
                 var serializer = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
                 return serializer.Deserialize<SolarTile.Sensor[]>(await response.Content.ReadAsStringAsync());
             }
@@ -607,11 +672,11 @@ sealed class Options : Form
 
         internal SensorPicker(SolarTile.Sensor[] sensors, string unit, string current)
         {
-            Text = "Sensor auswählen";
+            Text = UiText.Get("Sensor auswählen", "Select sensor");
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = MinimizeBox = false;
-            Font = new Font("Segoe UI", 10);
+            Font = new Font("Segoe UI", 9.5f);
             AutoScaleMode = AutoScaleMode.Font;
             ClientSize = new Size(660, 410);
             BackColor = Surface;
@@ -630,14 +695,14 @@ sealed class Options : Form
                         ? sensor.attributes.unit_of_measurement == "%"
                         : new[] { "W", "kW", "MW" }.Contains(sensor.attributes.unit_of_measurement))))
                 .OrderBy(sensor => sensor.Display).ToArray();
-            var label = new Label { Text = unit == "%" ? "Sensoren mit % (Akkustand)" : "Leistungssensoren mit W, kW oder MW",
+            var label = new Label { Text = unit == "%" ? UiText.Get("Sensoren mit % (Akkustand)", "Battery sensors in %") : UiText.Get("Leistungssensoren mit W, kW oder MW", "Power sensors in W, kW or MW"),
                 AutoSize = true, Location = new Point(12, 12) };
             var search = new TextBox { Bounds = new Rectangle(12, 38, 636, 24), BackColor = Input,
-                ForeColor = ForeColor, AccessibleName = "Sensoren suchen" };
+                ForeColor = ForeColor, AccessibleName = UiText.Get("Sensoren suchen", "Search sensors") };
             list = new ListBox { Bounds = new Rectangle(12, 70, 636, 288), BackColor = Input,
                 ForeColor = ForeColor, DisplayMember = "Display", HorizontalScrollbar = true };
-            var accept = new Button { Text = "Übernehmen", Bounds = new Rectangle(538, 369, 110, 28) };
-            var cancel = new Button { Text = "Abbrechen", Bounds = new Rectangle(420, 369, 110, 28), DialogResult = DialogResult.Cancel };
+            var accept = new SettingsButton { Primary = true, Text = UiText.Get("Übernehmen", "Apply"), Bounds = new Rectangle(538, 369, 110, 28) };
+            var cancel = new SettingsButton { Text = UiText.Get("Abbrechen", "Cancel"), Bounds = new Rectangle(420, 369, 110, 28), DialogResult = DialogResult.Cancel };
             StyleButton(accept);
             StyleButton(cancel);
             accept.Click += delegate { if (list.SelectedItem != null) DialogResult = DialogResult.OK; };
@@ -653,7 +718,7 @@ sealed class Options : Form
                     if (((SolarTile.Sensor)list.Items[i]).entity_id == current) { list.SelectedIndex = i; break; }
                 accept.Enabled = list.SelectedIndex >= 0;
                 list.EndUpdate();
-                label.Text = list.Items.Count == 0 ? "Keine passenden Sensoren gefunden." : list.Items.Count + " passende Sensoren";
+                label.Text = list.Items.Count == 0 ? UiText.Get("Keine passenden Sensoren gefunden.", "No matching sensors found.") : list.Items.Count + UiText.Get(" passende Sensoren", " matching sensors");
             };
             search.TextChanged += delegate { filter(); };
             Controls.AddRange(new Control[] { label, search, list, cancel, accept });
@@ -673,19 +738,19 @@ sealed class Options : Form
             {
                 string entity = entities[i].Text.Trim().ToLowerInvariant();
                 if (entity.Length != 0 && !Regex.IsMatch(entity, @"^[a-z0-9_]+\.[a-z0-9_]+$"))
-                    throw new ArgumentException("Bitte gültige Entitäts-IDs eingeben oder ungenutzte Felder leer lassen.");
+                    throw new ArgumentException(UiText.Get("Bitte gültige Entitäts-IDs eingeben oder ungenutzte Felder leer lassen.", "Enter valid entity IDs or leave unused fields blank."));
                 next.Entities[i] = entity;
             }
 
             next.GridExportEntity = gridExport.Text.Trim().ToLowerInvariant();
             if (next.GridExportEntity.Length != 0 &&
                 !Regex.IsMatch(next.GridExportEntity, @"^[a-z0-9_]+\.[a-z0-9_]+$"))
-                throw new ArgumentException("Bitte eine gültige Entitäts-ID für die Netzeinspeisung eingeben.");
+                throw new ArgumentException(UiText.Get("Bitte eine gültige Entitäts-ID für die Netzeinspeisung eingeben.", "Enter a valid entity ID for grid export."));
 
             if (token.Text.Trim().Length != 0) next.Token = Settings.Protect(token.Text.Trim());
             else if (CanReuseToken(uri))
                 next.Token = previous.Token;
-            else throw new ArgumentException("Bitte einen Zugriffstoken für diese Adresse eingeben.");
+            else throw new ArgumentException(UiText.Get("Bitte einen Zugriffstoken für diese Adresse eingeben.", "Enter an access token for this address."));
 
             next.Appearance = ReadAppearance();
             next.Save();
@@ -693,13 +758,13 @@ sealed class Options : Form
             DialogResult = DialogResult.OK;
         }
         catch (ArgumentException ex) { MessageBox.Show(this, ex.Message, Text); }
-        catch (Exception) { MessageBox.Show(this, "Die Einstellungen konnten nicht gespeichert werden.", Text); }
+        catch (Exception) { MessageBox.Show(this, UiText.Get("Die Einstellungen konnten nicht gespeichert werden.", "Could not save settings."), Text); }
     }
 }
 
 sealed class SolarTile : Form
 {
-    static readonly string[] Captions = { "Solar", "Akku", "Haus", "Netz" };
+    static readonly string[] Captions = { "Solar", UiText.Get("Akku", "Battery"), UiText.Get("Haus", "Home"), UiText.Get("Netz", "Grid") };
     readonly string[] values = { "—", "—", "—", "—" };
     readonly string[] metricHints = new string[4];
     Appearance appearance = new Appearance();
@@ -721,8 +786,8 @@ sealed class SolarTile : Form
     DoorWidget switches;
     HeatingWidget heating;
     HeatingWidget covers;
-    readonly System.Collections.Generic.Dictionary<string, DoorWidget> sensors = new System.Collections.Generic.Dictionary<string, DoorWidget>();
-    ToolStripMenuItem sensorMenu;
+    readonly System.Collections.Generic.Dictionary<string, DoorWidget> widgetInstances = new System.Collections.Generic.Dictionary<string, DoorWidget>();
+    ToolStripMenuItem sensorMenu, switchMenu;
     HomeAssistantEvents liveEvents;
     readonly object liveLock = new object();
     readonly System.Collections.Generic.HashSet<string> liveChanges = new System.Collections.Generic.HashSet<string>();
@@ -731,6 +796,7 @@ sealed class SolarTile : Form
     readonly ContextMenuStrip trayMenu = new WidgetMenu();
     static readonly string WidgetsFile = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), ReleaseVersion.DataFolder, "widgets.txt");
+    WidgetPlacement placement;
     static readonly string PositionFile = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), ReleaseVersion.DataFolder, "position.txt");
 
@@ -753,22 +819,24 @@ sealed class SolarTile : Form
         }
         if (!demo)
         {
-            menu.Items.Add("Einstellungen", null, delegate { Configure(); });
-            menu.Items.Add("Aktualisieren", null, async delegate { await RefreshValues(); });
+            menu.Items.Add(UiText.Get("Einstellungen", "Settings"), null, delegate { Configure(); });
+            menu.Items.Add(UiText.Get("Aktualisieren", "Refresh"), null, async delegate { await RefreshValues(); });
+            WidgetPlacement.AddLockMenuItem(menu, this, () => placement);
             try { settings = Settings.Load(); }
-            catch (Exception) { ShowEmpty("Einstellungen konnten nicht gelesen werden."); }
+            catch (Exception) { ShowEmpty(UiText.Get("Einstellungen konnten nicht gelesen werden.", "Could not read settings.")); }
             Shown += async delegate
             {
                 ApplyAppearance();
-                RestorePosition();
+                placement = new WidgetPlacement(this, "solar", LegacyPosition(),
+                    horizontalAnchor: () => appearance.HorizontalAnchor);
                 if (settings != null) await RefreshValues();
             };
             timer.Tick += async delegate { await RefreshValues(); };
         }
-        var pin = new ToolStripMenuItem("Immer im Vordergrund") { CheckOnClick = true };
-        pin.CheckedChanged += delegate { TopMost = pin.Checked; if (doors != null) doors.TopMost = TopMost; if (switches != null) switches.TopMost = TopMost; if (heating != null) heating.TopMost = TopMost; if (covers != null) covers.TopMost = TopMost; foreach (var widget in sensors.Values) widget.TopMost = TopMost; };
+        var pin = new ToolStripMenuItem(UiText.Get("Immer im Vordergrund", "Always on top")) { CheckOnClick = true };
+        pin.CheckedChanged += delegate { TopMost = pin.Checked; if (doors != null) doors.TopMost = TopMost; if (switches != null) switches.TopMost = TopMost; if (heating != null) heating.TopMost = TopMost; if (covers != null) covers.TopMost = TopMost; foreach (var widget in widgetInstances.Values) widget.TopMost = TopMost; };
         menu.Items.Add(pin);
-        menu.Items.Add("Schließen", null, delegate
+        menu.Items.Add(UiText.Get("Schließen", "Close"), null, delegate
         {
             if (demo) Close();
             else { Hide(); RememberWidgets(); }
@@ -783,26 +851,30 @@ sealed class SolarTile : Form
         ShowInTaskbar = false;
         if (!demo)
         {
-            var addWidget = new ToolStripMenuItem("Widget hinzufügen");
+            var addWidget = new ToolStripMenuItem(UiText.Get("Widget hinzufügen", "Add widget"));
             addWidget.DropDownItems.Add("Solar", null, delegate { OpenSolar(); });
-            addWidget.DropDownItems.Add(DoorWidget.DoorTitle, null, delegate { ShowDoors(); });
-            addWidget.DropDownItems.Add(DoorWidget.SwitchTitle, null, delegate { ShowDoors(switchWidget: true); });
+            var contactsMenu = new ToolStripMenuItem(DoorWidget.DoorTitle);
+            contactsMenu.DropDownItems.Add(UiText.Get("Öffnen", "Open"), null, delegate { ShowDoors(); });
+            contactsMenu.DropDownItems.Add(UiText.Get("Einstellungen…", "Settings…"), null, delegate { ShowDoors(editContacts: true); });
+            var closeContacts = contactsMenu.DropDownItems.Add(UiText.Get("Schließen", "Close"), null,
+                delegate { if (doors != null) doors.DisableContacts(); });
+            contactsMenu.DropDownOpening += delegate { closeContacts.Enabled = doors != null && doors.ContactsEnabled; };
+            addWidget.DropDownItems.Add(contactsMenu);
+            switchMenu = new ToolStripMenuItem(DoorWidget.SwitchTitle);
+            addWidget.DropDownItems.Add(switchMenu);
+            switchMenu.DropDownOpening += delegate { PopulateInstanceMenu(switchMenu, true); };
+            PopulateInstanceMenu(switchMenu, true);
             addWidget.DropDownItems.Add(HeatingWidget.Title, null, delegate { ShowHeating(); });
             addWidget.DropDownItems.Add(HeatingWidget.CoverTitle, null, delegate { ShowHeating(cover: true); });
             sensorMenu = new ToolStripMenuItem(DoorWidget.SensorTitle);
             addWidget.DropDownItems.Add(sensorMenu);
-            sensorMenu.DropDownOpening += delegate { PopulateSensorMenu(); };
-            PopulateSensorMenu();
+            sensorMenu.DropDownOpening += delegate { PopulateInstanceMenu(sensorMenu, false); };
+            PopulateInstanceMenu(sensorMenu, false);
             trayMenu.Items.Add(addWidget);
-            trayMenu.Items.Add("Einstellungen", null, delegate { Configure(); });
-            trayMenu.Items.Add("Einstellungen sichern…", null, delegate { ProfileBackup.Export(this, settings); });
-            trayMenu.Items.Add("Einstellungen wiederherstellen…", null, delegate
-            {
-                if (ProfileBackup.Import(this, settings)) ExitWidgets();
-            });
-            trayMenu.Items.Add("Programm beenden", null, delegate { ExitWidgets(); });
+            trayMenu.Items.Add(UiText.Get("Einstellungen", "Settings"), null, delegate { OpenProgramOptions(); });
+            trayMenu.Items.Add(UiText.Get("Programm beenden", "Exit application"), null, delegate { ExitWidgets(); });
             tray = new NotifyIcon { Icon = WidgetIcon.Load(), Text = ReleaseVersion.ProductName, ContextMenuStrip = trayMenu };
-            tray.DoubleClick += delegate { Configure(); };
+            tray.DoubleClick += delegate { OpenProgramOptions(); };
         }
         if (demo) Shown += delegate { ApplyAppearance(); };
     }
@@ -826,7 +898,7 @@ sealed class SolarTile : Form
         if (settings == null)
         {
 #if STORE
-            BeginInvoke(new Action(delegate { Configure(); }));
+            BeginInvoke(new Action(delegate { Configure(connectionOnly: true); }));
 #endif
             return;
         }
@@ -840,7 +912,9 @@ sealed class SolarTile : Form
         if (active.Contains("heating")) ShowHeating(false);
         if (active.Contains("covers")) ShowHeating(false, cover: true);
         foreach (var id in active.Where(line => line.StartsWith("sensor:", StringComparison.Ordinal)).Select(line => line.Substring(7)).Distinct())
-            if (DoorWidget.IsSensorId(id) && DoorWidget.SensorWidgets().ContainsKey(id)) OpenSensor(id, false);
+            if (DoorWidget.IsSensorId(id) && DoorWidget.SavedWidgets().ContainsKey(id)) OpenInstance(id, false, false);
+        foreach (var id in active.Where(line => line.StartsWith("switch:", StringComparison.Ordinal)).Select(line => line.Substring(7)).Distinct())
+            if (DoorWidget.IsSensorId(id) && DoorWidget.SavedWidgets(true).ContainsKey(id)) OpenInstance(id, true, false);
     }
 
     void StartLive()
@@ -882,7 +956,7 @@ sealed class SolarTile : Form
             if (switches != null) tasks.Add(switches.RefreshLive(changes));
             if (heating != null) tasks.Add(heating.RefreshLive(changes));
             if (covers != null) tasks.Add(covers.RefreshLive(changes));
-            foreach (var widget in sensors.Values) tasks.Add(widget.RefreshLive(changes));
+            foreach (var widget in widgetInstances.Values) tasks.Add(widget.RefreshLive(changes));
             await Task.WhenAll(tasks);
         }
         finally { if (!exiting && !IsDisposed) liveTimer.Start(); }
@@ -897,8 +971,8 @@ sealed class SolarTile : Form
             string temp = WidgetsFile + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
-                File.WriteAllLines(temp, new[] { Visible ? "solar" : "", doors != null && doors.Visible ? "doors" : "", switches != null && switches.Visible ? "switches" : "", heating != null && heating.Visible ? "heating" : "", covers != null && covers.Visible ? "covers" : "" }
-                    .Concat(sensors.Where(pair => pair.Value.Visible).Select(pair => "sensor:" + pair.Key)));
+                File.WriteAllLines(temp, new[] { Visible ? "solar" : "", doors != null && doors.ContactsEnabled ? "doors" : "", switches != null && switches.Visible ? "switches" : "", heating != null && heating.Visible ? "heating" : "", covers != null && covers.Visible ? "covers" : "" }
+                    .Concat(widgetInstances.Where(pair => pair.Value.Visible).Select(pair => pair.Key)));
                 if (File.Exists(WidgetsFile)) File.Replace(temp, WidgetsFile, null);
                 else File.Move(temp, WidgetsFile);
             }
@@ -908,37 +982,41 @@ sealed class SolarTile : Form
         catch (UnauthorizedAccessException) { }
     }
 
-    void PopulateSensorMenu()
+    void PopulateInstanceMenu(ToolStripMenuItem menu, bool switchWidget)
     {
-        foreach (ToolStripItem item in sensorMenu.DropDownItems.Cast<ToolStripItem>().ToArray()) item.Dispose();
-        sensorMenu.DropDownItems.Add("Neue Sensor-Kachel…", null, delegate { OpenSensor(Guid.NewGuid().ToString("N")); });
-        foreach (var widget in DoorWidget.SensorWidgets().OrderBy(pair => pair.Value))
+        foreach (ToolStripItem item in menu.DropDownItems.Cast<ToolStripItem>().ToArray()) item.Dispose();
+        menu.DropDownItems.Add(switchWidget ? UiText.Get("Neues Schalter-Widget…", "New switch widget…") : UiText.Get("Neue Sensor-Kachel…", "New sensor widget…"), null,
+            delegate { OpenInstance(Guid.NewGuid().ToString("N"), switchWidget); });
+        if (switchWidget && (switches != null || File.Exists(DoorWidget.ConfigPath(true))))
+            menu.DropDownItems.Add(UiText.Get("Schalter (bisheriges Widget)", "Switches (original widget)"), null, delegate { ShowDoors(switchWidget: true); });
+        foreach (var widget in DoorWidget.SavedWidgets(switchWidget).OrderBy(pair => pair.Value))
         {
             string id = widget.Key;
-            sensorMenu.DropDownItems.Add(widget.Value, null, delegate { OpenSensor(id); });
+            menu.DropDownItems.Add(widget.Value, null, delegate { OpenInstance(id, switchWidget); });
         }
-        foreach (ToolStripItem item in sensorMenu.DropDownItems) item.ForeColor = Color.WhiteSmoke;
     }
 
-    void OpenSensor(string id, bool remember = true)
+    void OpenInstance(string id, bool switchWidget, bool remember = true)
     {
-        if (settings == null && !Configure()) return;
+        if (settings == null && !Configure(connectionOnly: true)) return;
+        string key = (switchWidget ? "switch:" : "sensor:") + id;
         DoorWidget widget;
-        if (!sensors.TryGetValue(id, out widget))
+        if (!widgetInstances.TryGetValue(key, out widget))
         {
-            widget = new DoorWidget(() => settings, TopMost, sensorId: id);
-            sensors.Add(id, widget);
-            widget.FormClosed += delegate { sensors.Remove(id); RememberWidgets(); };
+            widget = new DoorWidget(() => settings, TopMost, switches: switchWidget, instanceId: id);
+            widgetInstances.Add(key, widget);
+            widget.FormClosed += delegate { widgetInstances.Remove(key); RememberWidgets(); };
             widget.VisibleChanged += delegate { if (!widget.Visible) RememberWidgets(); };
         }
         widget.Show();
+        if (widget.IsDisposed) return;
         widget.Activate();
         if (remember) RememberWidgets();
     }
 
     void OpenSolar()
     {
-        if (settings == null && !Configure()) return;
+        if (settings == null && !Configure(connectionOnly: true)) return;
         bool reopening = IsHandleCreated;
         Show();
         Activate();
@@ -948,14 +1026,14 @@ sealed class SolarTile : Form
 
     async void RefreshVisibleSolar() { await RefreshValues(); }
 
-    void ShowDoors(bool remember = true, bool switchWidget = false)
+    void ShowDoors(bool remember = true, bool switchWidget = false, bool editContacts = false)
     {
-        if (settings == null && !Configure()) return;
+        if (settings == null && !Configure(connectionOnly: true)) return;
         var existing = switchWidget ? switches : doors;
         if (existing != null)
         {
-            existing.Show();
-            existing.Activate();
+            if (switchWidget) { existing.Show(); existing.Activate(); }
+            else existing.OpenContacts(editContacts);
             if (remember) RememberWidgets();
             return;
         }
@@ -968,14 +1046,22 @@ sealed class SolarTile : Form
             else doors = null;
             RememberWidgets();
         };
-        widget.Show();
-        widget.VisibleChanged += delegate { if (!widget.Visible) RememberWidgets(); };
+        if (switchWidget)
+        {
+            widget.Show();
+            widget.VisibleChanged += delegate { if (!widget.Visible) RememberWidgets(); };
+        }
+        else
+        {
+            widget.ContactsDisabled += RememberWidgets;
+            widget.OpenContacts(editContacts);
+        }
         if (remember) RememberWidgets();
     }
 
     void ShowHeating(bool remember = true, bool cover = false)
     {
-        if (settings == null && !Configure()) return;
+        if (settings == null && !Configure(connectionOnly: true)) return;
         var widget = cover ? covers : heating;
         if (widget == null)
         {
@@ -1002,7 +1088,7 @@ sealed class SolarTile : Form
         if (switches != null) switches.Close();
         if (heating != null) heating.Close();
         if (covers != null) covers.Close();
-        foreach (var widget in sensors.Values.ToArray()) widget.Close();
+        foreach (var widget in widgetInstances.Values.ToArray()) widget.Close();
         Close();
         Application.ExitThread();
     }
@@ -1014,7 +1100,7 @@ sealed class SolarTile : Form
         if (switches != null) switches.Close();
         if (heating != null) heating.Close();
         if (covers != null) covers.Close();
-        foreach (var widget in sensors.Values.ToArray()) widget.Close();
+        foreach (var widget in widgetInstances.Values.ToArray()) widget.Close();
         if (!demo) Application.ExitThread();
         base.OnFormClosing(args);
     }
@@ -1049,14 +1135,15 @@ sealed class SolarTile : Form
         // One alpha level keeps the transparent desktop tile reachable by the mouse.
         using (var bitmap = PaintTile(appearance, values, scale, 1, metricStarts))
         {
-            if (ClientSize != bitmap.Size) ClientSize = bitmap.Size;
+            if (placement != null) placement.Resize(bitmap.Size);
+            else if (ClientSize != bitmap.Size) ClientSize = bitmap.Size;
             LayeredTile.Present(Handle, bitmap);
         }
         AccessibleName = Text = ReleaseVersion.SolarName + ": " + string.Join(", ", Captions[0] + " " + values[0], Captions[1] + " " + values[1],
             Captions[2] + " " + values[2], Captions[3] + " " + values[3]);
     }
 
-    static Font CreateTileFont(string typeface, float size, FontStyle style)
+    internal static Font CreateTileFont(string typeface, float size, FontStyle style)
     {
         using (var font = new Font(typeface ?? "Segoe UI", size, style, GraphicsUnit.Point))
         using (var family = font.FontFamily)
@@ -1175,7 +1262,7 @@ sealed class SolarTile : Form
     {
         control.MouseDown += delegate(object sender, MouseEventArgs args)
         {
-            if (args.Button != MouseButtons.Left) return;
+            if (args.Button != MouseButtons.Left || (placement != null && placement.Locked)) return;
             dragSource = control;
             pointerStart = Cursor.Position;
             windowStart = Location;
@@ -1183,7 +1270,7 @@ sealed class SolarTile : Form
         };
         control.MouseMove += delegate
         {
-            if (dragSource != control || !control.Capture) return;
+            if (dragSource != control || !control.Capture || (placement != null && placement.Locked)) return;
             Point point = Cursor.Position;
             Location = new Point(windowStart.X + point.X - pointerStart.X, windowStart.Y + point.Y - pointerStart.Y);
         };
@@ -1196,45 +1283,45 @@ sealed class SolarTile : Form
         };
     }
 
-    static Point KeepOnScreen(Point saved, Size size, Rectangle area)
-    {
-        return new Point(
-            Math.Max(area.Left, Math.Min(saved.X, area.Right - size.Width)),
-            Math.Max(area.Top, Math.Min(saved.Y, area.Bottom - size.Height)));
-    }
-
-    void RestorePosition()
+    Point LegacyPosition()
     {
         try
         {
-            if (!File.Exists(PositionFile)) return;
+            if (!File.Exists(PositionFile)) return Location;
             string[] coordinates = File.ReadAllText(PositionFile).Split(',');
             int x, y;
             if (coordinates.Length != 2 ||
                 !int.TryParse(coordinates[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out x) ||
-                !int.TryParse(coordinates[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out y)) return;
+                !int.TryParse(coordinates[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out y)) return Location;
 
-            var point = new Point(x, y);
-            Location = KeepOnScreen(point, Size, Screen.FromPoint(point).WorkingArea);
+            return new Point(x, y);
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
+        return Location;
     }
 
     void SavePosition()
     {
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(PositionFile));
-            File.WriteAllText(PositionFile, string.Format(CultureInfo.InvariantCulture, "{0},{1}", Left, Top));
+            if (placement != null) placement.Save();
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
     }
 
-    bool Configure()
+    void OpenProgramOptions()
     {
-        using (var dialog = new Options(settings, values))
+        bool restore = false;
+        using (var dialog = new ProgramOptions(() => settings, () => Configure(connectionOnly: true), () => restore = true))
+            dialog.ShowDialog();
+        if (restore) ExitWidgets();
+    }
+
+    bool Configure(bool connectionOnly = false)
+    {
+        using (var dialog = new Options(settings, values, connectionOnly: connectionOnly))
         {
             if ((Visible ? dialog.ShowDialog(this) : dialog.ShowDialog()) != DialogResult.OK) return false;
             settings = dialog.Result;
@@ -1243,7 +1330,7 @@ sealed class SolarTile : Form
         }
         if (Visible)
         {
-            ShowEmpty("Messwerte werden geladen");
+            ShowEmpty(UiText.Get("Messwerte werden geladen", "Loading readings"));
             RefreshVisibleSolar();
         }
         return true;
@@ -1271,7 +1358,7 @@ sealed class SolarTile : Form
         {
             string token;
             try { token = current.ReadToken(); }
-            catch (Exception) { ShowEmpty("Zugriffstoken kann nicht gelesen werden. Bitte neu eingeben."); return; }
+            catch (Exception) { ShowEmpty(UiText.Get("Zugriffstoken kann nicht gelesen werden. Bitte neu eingeben.", "Could not read the access token. Enter it again.")); return; }
             var requests = new Task<Tuple<string, string>>[4];
             for (int i = 0; i < requests.Length; i++) requests[i] = ReadMetric(current, i, token);
             var readings = await Task.WhenAll(requests);
@@ -1316,7 +1403,7 @@ sealed class SolarTile : Form
 
     async Task<Tuple<double?, string>> Read(Settings current, string entity, int index, string token)
     {
-        if (string.IsNullOrEmpty(entity)) return Tuple.Create<double?, string>(null, "Sensor in den Einstellungen auswählen.");
+        if (string.IsNullOrEmpty(entity)) return Tuple.Create<double?, string>(null, UiText.Get("Sensor in den Einstellungen auswählen.", "Select a sensor in Settings."));
         try
         {
             using (var request = new HttpRequestMessage(HttpMethod.Get, current.Url.TrimEnd('/') + "/api/states/" + Uri.EscapeDataString(entity)))
@@ -1325,22 +1412,22 @@ sealed class SolarTile : Form
                 using (var response = await client.SendAsync(request))
                 {
                     int code = (int)response.StatusCode;
-                    if (code == 401 || code == 403) return Tuple.Create<double?, string>(null, "Home Assistant hat den Zugriff abgelehnt");
-                    if (code == 404) return Tuple.Create<double?, string>(null, "Entität nicht gefunden: " + entity);
+                    if (code == 401 || code == 403) return Tuple.Create<double?, string>(null, UiText.Get("Home Assistant hat den Zugriff abgelehnt", "Home Assistant denied access"));
+                    if (code == 404) return Tuple.Create<double?, string>(null, UiText.Get("Entität nicht gefunden: ", "Entity not found: ") + entity);
                     if (!response.IsSuccessStatusCode) return Tuple.Create<double?, string>(null, "HTTP " + code);
                     var state = new JavaScriptSerializer().Deserialize<Sensor>(await response.Content.ReadAsStringAsync());
                     double? reading = state == null || state.attributes == null
                         ? null : ParseReading(index, state.state, state.attributes.unit_of_measurement);
-                    return Tuple.Create(reading, "Sensorwert oder Einheit nicht verfügbar: " + entity);
+                    return Tuple.Create(reading, UiText.Get("Sensorwert oder Einheit nicht verfügbar: ", "Sensor value or unit unavailable: ") + entity);
                 }
             }
         }
-        catch (Exception) { return Tuple.Create<double?, string>(null, "Messwert konnte nicht geladen werden: " + entity); }
+        catch (Exception) { return Tuple.Create<double?, string>(null, UiText.Get("Messwert konnte nicht geladen werden: ", "Could not load sensor reading: ") + entity); }
     }
 
     static string DisplayReading(int index, double number)
     {
-        var culture = CultureInfo.GetCultureInfo("de-DE");
+        var culture = CultureInfo.GetCultureInfo(UiText.Get("de-DE", "en-US"));
         if (index == 1) return number.ToString("N0", culture) + " %";
         if (Math.Abs(number) > 1000) return (number / 1000).ToString("0.##", culture) + " kW";
         return number.ToString("N0", culture) + " W";
@@ -1410,6 +1497,8 @@ sealed class SolarTile : Form
         public string device_class { get; set; }
         public int supported_features { get; set; }
         public string[] supported_color_modes { get; set; }
+        public int? brightness { get; set; }
+        public int[] rgb_color { get; set; }
     }
 
     [DllImport("user32.dll")]
@@ -1433,17 +1522,36 @@ sealed class SolarTile : Form
             using (var dialog = new Options(null, tile.values))
             {
                 if (new JavaScriptSerializer().Deserialize<Appearance>("{}").IconSize != 44) return 1;
-                if (KeepOnScreen(new Point(-800, 90), new Size(400, 66),
+                if (WidgetPlacement.KeepOnScreen(new Point(-800, 90), new Size(400, 66),
                     new Rectangle(-1920, 0, 1920, 1080)) != new Point(-800, 90) ||
-                    KeepOnScreen(new Point(990, 990), new Size(400, 66),
+                    WidgetPlacement.KeepOnScreen(new Point(990, 990), new Size(400, 66),
                     new Rectangle(0, 0, 1000, 1000)) != new Point(600, 934)) return 1;
                 var starts = new float[4];
                 using (var preview = PaintTile(new Appearance { BackgroundOpacity = 0, MetricSpacing = 0 }, tile.values, 1, 0, starts))
                     if (preview.GetPixel(preview.Width / 2, 2).A != 0 || preview.Width >= 430) return 1;
                 var door = new Door { Open = "Auf", Closed = "Zu" };
                 if (door.Describe("on") != "Auf" || door.Describe("closed") != "Zu" ||
-                    door.Describe("unavailable") != "Nicht verfügbar") return 1;
+                    door.Describe("unavailable") != UiText.Get("Nicht verfügbar", "Unavailable")) return 1;
                 using (var doorWidget = new DoorWidget(() => null, false)) { }
+                if (WidgetPlacement.LeftAfterResize(100, 200, 250, HorizontalAnchor.Left) != 100 ||
+                    WidgetPlacement.LeftAfterResize(100, 200, 250, HorizontalAnchor.Right) != 50 ||
+                    WidgetPlacement.LeftAfterResize(100, 200, 251, HorizontalAnchor.Center) != 75 ||
+                    WidgetPlacement.LeftAfterResize(75, 251, 200, HorizontalAnchor.Center) != 100 ||
+                    new JavaScriptSerializer().Deserialize<Appearance>("{}").HorizontalAnchor != HorizontalAnchor.Right) return 1;
+                if (DoorWidget.AnyContactOpen(null) || DoorWidget.AnyContactOpen(new[] { "off", "closed", "unknown", "unavailable" }) ||
+                    !DoorWidget.AnyContactOpen(new[] { "off", "on" }) || !DoorWidget.AnyContactOpen(new[] { "open" }) ||
+                    !DoorWidget.AnyContactOpen(new[] { "opening" }) || !DoorWidget.AnyContactOpen(new[] { "closing" })) return 1;
+                var sampleLight = new JavaScriptSerializer().Deserialize<Sensor>(
+                    "{\"state\":\"on\",\"attributes\":{\"brightness\":125,\"supported_color_modes\":[\"xy\"],\"rgb_color\":[255,137,0]}}");
+                var lightStyle = new Appearance { BackgroundOpacity = 0, Background = Color.Navy.ToArgb() };
+                using (var light = new LightControls("Testlampe", lightStyle, () => sampleLight,
+                    (service, data) => Task.FromResult(0), Point.Empty))
+                {
+                    if (light.Controls.OfType<Label>().Any(label => label.Text.Length != 0) ||
+                        !light.Controls.Cast<Control>().Any(control => control.AccessibleDescription == UiText.Get("49 Prozent", "49 percent")) ||
+                        light.Controls.OfType<Button>().Count() != 8 ||
+                        light.BackColor.ToArgb() != lightStyle.Background || light.Opacity != 1) return 1;
+                }
                 using (var doorOptions = new Options(null, new[] { "Zu" }, new Appearance(), new Appearance(),
                     new DoorWidget.DoorEditor(new[] { new Door { Name = "Testtür", Open = "Auf", Closed = "Zu" } }, () => null))) { }
                 string heatPosition = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".json");
@@ -1459,6 +1567,17 @@ sealed class SolarTile : Form
                     {
                         thermostat.RestorePosition();
                         if (thermostat.Location != expected) return 1;
+                    }
+                    using (var lockTestForm = new Form())
+                    using (var menu = new WidgetMenu())
+                    {
+                        var placement = new WidgetPlacement(lockTestForm, "test-lock", expected, heatPosition);
+                        WidgetPlacement.AddLockMenuItem(menu, lockTestForm, () => placement);
+                        menu.Items[0].PerformClick();
+                        if (!placement.Locked || !new WidgetPlacement(lockTestForm, "test-lock", expected, heatPosition).Locked ||
+                            new WidgetPlacement(lockTestForm, "test-other-widget", expected, heatPosition).Locked) return 1;
+                        menu.Items[0].PerformClick();
+                        if (new WidgetPlacement(lockTestForm, "test-lock", expected, heatPosition).Locked) return 1;
                     }
                 }
                 finally { File.Delete(heatPosition); }
@@ -1481,7 +1600,7 @@ sealed class SolarTile : Form
                 using (var heatPreview = HeatingWidget.Preview(heatStyle, new Door[0], 1))
                     if (heatPreview.Width < 100 || heatPreview.GetPixel(0, 0).A != 0) return 1;
                 if (!HeatingWidget.IsClimate("climate.wohnzimmer") || HeatingWidget.IsClimate("sensor.temperatur")) return 1;
-                var lamp = new Door { Name = "Lampe", IconKind = "Schalter", Open = "Ein", Closed = "Aus" };
+                var lamp = new Door { Name = UiText.Get("Lampe", "Light"), IconKind = "Schalter", Open = "Ein", Closed = "Aus" };
                 using (var options = new Options(null, new string[0], new Appearance(), new Appearance(),
                     new DoorWidget.DoorEditor(new[] { lamp }, () => null, true))) { }
                 using (var on = DoorWidget.PaintDoors(new Appearance(), new[] { lamp.Name }, new[] { lamp.Describe("on") },
@@ -1504,12 +1623,12 @@ sealed class SolarTile : Form
                 tile.appearance.IconSize = 96;
                 tile.RenderTile();
                 bool resizes = tile.Width > oldWidth && tile.Height > oldHeight &&
-                    tile.AccessibleName.Contains("-7,2 kW");
+                    tile.AccessibleName.Contains(UiText.Get("-7,2 kW", "-7.2 kW"));
                 tile.Close();
-                return resizes && tile.values[3] == "-7,2 kW" && Format(3, "-7.2", "kW") == "-7,2 kW" &&
+                return resizes && tile.values[3] == UiText.Get("-7,2 kW", "-7.2 kW") && Format(3, "-7.2", "kW") == UiText.Get("-7,2 kW", "-7.2 kW") &&
                     DisplayReading(3, NetReading(ParseReading(3, "0.1", "kW").Value,
-                        ParseReading(3, "300", "W").Value)) == "-200 W" && Format(0, "1000", "W") == "1.000 W" &&
-                    Format(2, "1349", "W") == "1,35 kW" && Format(1, "100", "%") == "100 %" && Format(0, "unavailable", "W") == null &&
+                        ParseReading(3, "300", "W").Value)) == "-200 W" && Format(0, "1000", "W") == UiText.Get("1.000 W", "1,000 W") &&
+                    Format(2, "1349", "W") == UiText.Get("1,35 kW", "1.35 kW") && Format(1, "100", "%") == "100 %" && Format(0, "unavailable", "W") == null &&
                     new Settings { Token = Settings.Protect("test-token") }.ReadToken() == "test-token" ? 0 : 1;
             }
         }
@@ -1541,7 +1660,7 @@ sealed class PreviewPanel : Control
         this.values = (string[])values.Clone();
         DoubleBuffered = true;
         ResizeRedraw = true;
-        AccessibleName = "Live-Vorschau für " + ReleaseVersion.SolarName;
+        AccessibleName = UiText.Get("Live-Vorschau für ", "Live preview for ") + ReleaseVersion.SolarName;
     }
 
     protected override void OnPaint(PaintEventArgs args)
@@ -1682,43 +1801,111 @@ static class WidgetIcon
 }
 sealed class WidgetMenu : ContextMenuStrip
 {
+    static readonly Color Surface = Color.FromArgb(31, 31, 31);
+    static readonly Color Highlight = Color.FromArgb(57, 57, 57);
+    static readonly Color TextColor = Color.FromArgb(245, 245, 245);
+    static readonly ToolStripRenderer MenuRenderer = new MenuStyle();
+    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ToolStripDropDownMenu, object>
+        StyledMenus = new System.Runtime.CompilerServices.ConditionalWeakTable<ToolStripDropDownMenu, object>();
+
     internal WidgetMenu()
     {
-        Renderer = new ToolStripProfessionalRenderer(new DarkColors()) { RoundedEdges = false };
-        ForeColor = Color.WhiteSmoke;
-        ShowImageMargin = false;
-        ShowCheckMargin = true;
-        ItemAdded += delegate(object sender, ToolStripItemEventArgs args)
-        {
-            args.Item.ForeColor = ForeColor;
-            var item = args.Item as ToolStripMenuItem;
-            if (item != null && item.HasDropDownItems)
-            {
-                item.DropDown.ForeColor = ForeColor;
-                foreach (ToolStripItem child in item.DropDownItems) child.ForeColor = ForeColor;
-            }
-        };
+        StyleMenu(this);
     }
 
-    sealed class DarkColors : ProfessionalColorTable
+    static int Scale(ToolStrip menu, int value)
     {
-        static readonly Color Surface = Color.FromArgb(30, 30, 33);
-        static readonly Color Highlight = Color.FromArgb(54, 54, 59);
-        static readonly Color Edge = Color.FromArgb(84, 84, 90);
-        public override Color ToolStripDropDownBackground { get { return Surface; } }
-        public override Color ImageMarginGradientBegin { get { return Surface; } }
-        public override Color ImageMarginGradientMiddle { get { return Surface; } }
-        public override Color ImageMarginGradientEnd { get { return Surface; } }
-        public override Color MenuBorder { get { return Edge; } }
-        public override Color MenuItemBorder { get { return Edge; } }
-        public override Color MenuItemSelected { get { return Highlight; } }
-        public override Color MenuItemSelectedGradientBegin { get { return Highlight; } }
-        public override Color MenuItemSelectedGradientEnd { get { return Highlight; } }
-        public override Color MenuItemPressedGradientBegin { get { return Highlight; } }
-        public override Color MenuItemPressedGradientMiddle { get { return Highlight; } }
-        public override Color MenuItemPressedGradientEnd { get { return Highlight; } }
-        public override Color CheckBackground { get { return Highlight; } }
-        public override Color CheckSelectedBackground { get { return Highlight; } }
-        public override Color CheckPressedBackground { get { return Highlight; } }
+        return menu.LogicalToDeviceUnits(value);
+    }
+
+    static void StyleMenu(ToolStripDropDownMenu menu)
+    {
+        object styled;
+        if (StyledMenus.TryGetValue(menu, out styled)) return;
+        StyledMenus.Add(menu, new object());
+        menu.Renderer = MenuRenderer;
+        menu.BackColor = Surface;
+        menu.ForeColor = TextColor;
+        menu.ShowImageMargin = false;
+        menu.ShowCheckMargin = false;
+        ApplyInsets(menu);
+        menu.HandleCreated += delegate { ApplyCorners(menu); };
+        menu.ItemAdded += delegate(object sender, ToolStripItemEventArgs args) { StyleItem(menu, args.Item); };
+        menu.Opening += delegate
+        {
+            menu.ShowCheckMargin = menu.Items.OfType<ToolStripMenuItem>().Any(item => item.CheckOnClick || item.Checked);
+            ApplyInsets(menu);
+            foreach (ToolStripItem item in menu.Items) StyleItem(menu, item);
+            ApplyCorners(menu);
+        };
+        foreach (ToolStripItem item in menu.Items) StyleItem(menu, item);
+    }
+
+    static void ApplyInsets(ToolStripDropDownMenu menu)
+    {
+        int inset = Scale(menu, 8);
+        menu.Padding = new Padding(inset);
+    }
+
+    static void StyleItem(ToolStripDropDownMenu menu, ToolStripItem item)
+    {
+        var entry = item as ToolStripMenuItem;
+        if (entry == null) return;
+        entry.ForeColor = TextColor;
+        entry.Padding = new Padding(Scale(menu, 8), Scale(menu, 5), Scale(menu, 8), Scale(menu, 5));
+        if (!entry.HasDropDownItems) return;
+        var submenu = entry.DropDown as ToolStripDropDownMenu;
+        if (submenu != null) StyleMenu(submenu);
+    }
+
+    static void ApplyCorners(ToolStripDropDownMenu menu)
+    {
+        if (!menu.IsHandleCreated) return;
+        SettingsTheme.UseRoundedWindowCorners(menu.Handle);
+    }
+
+    sealed class MenuStyle : ToolStripSystemRenderer
+    {
+        protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs args) { }
+        protected override void OnRenderImageMargin(ToolStripRenderEventArgs args) { }
+
+        protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs args)
+        {
+            using (var brush = new SolidBrush(Surface))
+                args.Graphics.FillRectangle(brush, args.ToolStrip.ClientRectangle);
+        }
+
+        protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs args)
+        {
+            if (!args.Item.Selected && !args.Item.Pressed) return;
+            var bounds = new Rectangle(Point.Empty, args.Item.Size);
+            bounds.Inflate(-Scale(args.ToolStrip, 3), -1);
+            if (bounds.Width < 2 || bounds.Height < 2) return;
+            var state = args.Graphics.Save();
+            try
+            {
+                args.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                using (var shape = SettingsTheme.Rounded(bounds, Scale(args.ToolStrip, 5)))
+                using (var brush = new SolidBrush(Highlight))
+                    args.Graphics.FillPath(brush, shape);
+            }
+            finally { args.Graphics.Restore(state); }
+        }
+
+        protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs args)
+        {
+            args.TextColor = args.Item.Enabled ? TextColor : Color.FromArgb(148, 148, 148);
+            var text = args.TextRectangle;
+            args.TextRectangle = new Rectangle(text.X, 0, text.Width, args.Item.Height);
+            args.TextFormat = (args.TextFormat & ~TextFormatFlags.Bottom) |
+                TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine;
+            base.OnRenderItemText(args);
+        }
+
+        protected override void OnRenderArrow(ToolStripArrowRenderEventArgs args)
+        {
+            args.ArrowColor = args.Item.Enabled ? TextColor : Color.FromArgb(148, 148, 148);
+            base.OnRenderArrow(args);
+        }
     }
 }

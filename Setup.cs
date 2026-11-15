@@ -29,14 +29,14 @@ static class Setup
             if (args.Length == 2 && args[0] == "--cleanup")
             {
                 using (var parent = Process.GetProcessById(int.Parse(args[1])))
-                    if (!parent.WaitForExit(10000)) throw new IOException("Das Deinstallationsprogramm wurde nicht beendet.");
+                    if (!parent.WaitForExit(10000)) throw new IOException(UiText.Get("Das Deinstallationsprogramm wurde nicht beendet.", "The uninstaller did not exit."));
                 Uninstall();
                 return 0;
             }
 
             if (args.Length == 1 && args[0] == "--uninstall")
             {
-                if (MessageBox.Show(Title + " deinstallieren?", Title, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                if (MessageBox.Show(Title + UiText.Get(" deinstallieren?", " uninstall?"), Title, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
                     return 0;
                 EnsureClosed();
                 if (string.Equals(Application.ExecutablePath, Maintenance, StringComparison.OrdinalIgnoreCase))
@@ -49,11 +49,11 @@ static class Setup
                 return 0;
             }
 
-            if (MessageBox.Show(Title + " für dieses Windows-Konto installieren?", Title,
+            if (MessageBox.Show(Title + UiText.Get(" für dieses Windows-Konto installieren?", " install for this Windows account?"), Title,
                 MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return 0;
             EnsureClosed();
             Install();
-            if (MessageBox.Show(Title + " wurde installiert. Jetzt starten?", Title,
+            if (MessageBox.Show(Title + UiText.Get(" wurde installiert. Jetzt starten?", " has been installed. Start it now?"), Title,
                 MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes) Process.Start(Program);
             return 0;
         }
@@ -66,7 +66,7 @@ static class Setup
 
     static Stream Payload()
     {
-        return Assembly.GetExecutingAssembly().GetManifestResourceStream("SolarKachel.exe");
+        return Assembly.GetExecutingAssembly().GetManifestResourceStream("DesktopWidgetsForHomeAssistant.exe");
     }
 
     static void EnsureClosed()
@@ -76,7 +76,7 @@ static class Setup
             using (process)
             {
                 if (string.Equals(process.MainModule.FileName, Program, StringComparison.OrdinalIgnoreCase))
-                    throw new IOException("Bitte das installierte Solar Widget zuerst schließen.");
+                    throw new IOException(UiText.Get("Bitte das installierte Solar Widget zuerst schließen.", "Close the installed app first."));
             }
         }
     }
@@ -100,7 +100,7 @@ static class Setup
         dynamic link = ((dynamic)shell).CreateShortcut(Shortcut);
         link.TargetPath = Program;
         link.WorkingDirectory = InstallDir;
-        link.Description = "Solarwerte aus Home Assistant";
+        link.Description = "Desktop Widgets for Home Assistant";
         link.IconLocation = Program + ",0";
         link.Save();
         File.Delete(Path.Combine(Path.GetDirectoryName(Shortcut), "Home Assistant Widget.lnk"));
@@ -109,7 +109,7 @@ static class Setup
         using (var key = Registry.CurrentUser.CreateSubKey(RegistryPath))
         {
             key.SetValue("DisplayName", Title);
-            key.SetValue("DisplayVersion", ReleaseVersion.Version);
+            key.SetValue("DisplayVersion", ReleaseVersion.Version + " (Build " + ReleaseVersion.Build + ")");
             key.SetValue("DisplayIcon", Program);
             key.SetValue("InstallLocation", InstallDir);
             key.SetValue("UninstallString", "\"" + Maintenance + "\" --uninstall");
@@ -125,7 +125,9 @@ static class Setup
         File.Delete(Shortcut);
         if (Directory.Exists(InstallDir) && Directory.GetFileSystemEntries(InstallDir).Length == 0)
             Directory.Delete(InstallDir);
+        using (var startup = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true))
+            if (startup != null) startup.DeleteValue("DesktopWidgetsForHomeAssistant", false);
         Registry.CurrentUser.DeleteSubKeyTree(RegistryPath, false);
-        MessageBox.Show(Title + " wurde deinstalliert.", Title);
+        MessageBox.Show(Title + UiText.Get(" wurde deinstalliert.", " has been uninstalled."), Title);
     }
 }

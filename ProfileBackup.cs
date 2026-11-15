@@ -7,10 +7,11 @@ using System.Windows.Forms;
 
 static class ProfileBackup
 {
+    static readonly string BackupFilter = UiText.Get("Widget-Sicherung (*.json)|*.json", "Widget backup (*.json)|*.json");
     static readonly string Folder = Path.Combine(Environment.GetFolderPath(
         Environment.SpecialFolder.LocalApplicationData), ReleaseVersion.DataFolder);
     static readonly string[] WidgetFiles = { "doors.json", "switches.json", "heating.json", "covers.json",
-        "heating-position.json", "covers-position.json", "widgets.txt", "position.txt" };
+        "heating-position.json", "covers-position.json", "widgets.txt", "position.txt", WidgetPlacement.FileName };
 
     public sealed class Backup
     {
@@ -23,7 +24,7 @@ static class ProfileBackup
 
     internal static void Export(IWin32Window owner, Settings settings)
     {
-        using (var dialog = new SaveFileDialog { Filter = "Widget-Sicherung (*.json)|*.json",
+        using (var dialog = new SaveFileDialog { Filter = BackupFilter,
             FileName = "DesktopWidgets-" + DateTime.Now.ToString("yyyy-MM-dd") + ".json" })
         {
             if (dialog.ShowDialog(owner) != DialogResult.OK) return;
@@ -35,9 +36,14 @@ static class ProfileBackup
                     var path = Path.Combine(Folder, file);
                     if (File.Exists(path)) data.Widgets[file] = File.ReadAllText(path);
                 }
-                foreach (var widget in DoorWidget.SensorWidgets())
+                foreach (var widget in DoorWidget.SavedWidgets())
                 {
                     string file = "sensor-widgets/" + widget.Key + ".json";
+                    data.Widgets[file] = File.ReadAllText(Path.Combine(Folder, file));
+                }
+                foreach (var widget in DoorWidget.SavedWidgets(true))
+                {
+                    string file = "switch-widgets/" + widget.Key + ".json";
                     data.Widgets[file] = File.ReadAllText(Path.Combine(Folder, file));
                 }
                 if (settings != null)
@@ -47,9 +53,9 @@ static class ProfileBackup
                     data.Appearance = settings.Appearance;
                 }
                 Write(dialog.FileName, new JavaScriptSerializer().Serialize(data));
-                MessageBox.Show(owner, "Widget-Einstellungen wurden gesichert.", ReleaseVersion.ProductName);
+                MessageBox.Show(owner, UiText.Get("Widget-Einstellungen wurden gesichert.", "Widget settings backed up."), ReleaseVersion.ProductName);
             }
-            catch (Exception) { MessageBox.Show(owner, "Die Sicherung konnte nicht gespeichert werden.", ReleaseVersion.ProductName); }
+            catch (Exception) { MessageBox.Show(owner, UiText.Get("Die Sicherung konnte nicht gespeichert werden.", "Could not save the backup."), ReleaseVersion.ProductName); }
         }
     }
 
@@ -57,10 +63,10 @@ static class ProfileBackup
     {
         if (settings == null)
         {
-            MessageBox.Show(owner, "Bitte zuerst mit Home Assistant verbinden.", ReleaseVersion.ProductName);
+            MessageBox.Show(owner, UiText.Get("Bitte zuerst mit Home Assistant verbinden.", "Connect to Home Assistant first."), ReleaseVersion.ProductName);
             return false;
         }
-        using (var dialog = new OpenFileDialog { Filter = "Widget-Sicherung (*.json)|*.json" })
+        using (var dialog = new OpenFileDialog { Filter = BackupFilter })
         {
             if (dialog.ShowDialog(owner) != DialogResult.OK) return false;
             try
@@ -80,7 +86,7 @@ static class ProfileBackup
                         !(serializer.DeserializeObject(pair.Value) is object[]))
                         throw new InvalidDataException();
 
-                if (MessageBox.Show(owner, "Gesicherte Widgets und Positionen übernehmen? Die App wird danach beendet. Öffne sie anschließend erneut.",
+                if (MessageBox.Show(owner, UiText.Get("Gesicherte Widgets und Positionen übernehmen? Die App wird danach beendet. Öffne sie anschließend erneut.", "Restore the saved widgets and positions? The app will close. Open it again afterward."),
                     ReleaseVersion.ProductName, MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return false;
 
                 var paths = data.Widgets.ToDictionary(pair => Path.Combine(Folder, pair.Key), pair => pair.Value);
@@ -113,7 +119,7 @@ static class ProfileBackup
             }
             catch (Exception)
             {
-                MessageBox.Show(owner, "Die Sicherung konnte nicht wiederhergestellt werden.", ReleaseVersion.ProductName);
+                MessageBox.Show(owner, UiText.Get("Die Sicherung konnte nicht wiederhergestellt werden.", "Could not restore the backup."), ReleaseVersion.ProductName);
                 return false;
             }
         }
@@ -126,7 +132,7 @@ static class ProfileBackup
 
     static bool Allowed(string name)
     {
-        const string prefix = "sensor-widgets/";
+        string prefix = name.StartsWith("switch-widgets/", StringComparison.Ordinal) ? "switch-widgets/" : "sensor-widgets/";
         return WidgetFiles.Contains(name) || (name.StartsWith(prefix, StringComparison.Ordinal) &&
             name.EndsWith(".json", StringComparison.Ordinal) &&
             DoorWidget.IsSensorId(name.Substring(prefix.Length, name.Length - prefix.Length - 5)));
