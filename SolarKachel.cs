@@ -52,13 +52,9 @@ sealed class Settings
     public string GridExportEntity { get; set; }
     public Appearance Appearance { get; set; }
 
-    internal static readonly string[] Defaults = {
-        "sensor.pv_gesamt", "sensor.battery_level",
-        "sensor.stromverbrauch_haus", "sensor.import_power"
-    };
     static readonly string FilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "SolarKachel", "settings.json");
+        ReleaseVersion.DataFolder, "settings.json");
 
     internal static Settings Load()
     {
@@ -196,17 +192,20 @@ sealed class Options : Form
         var versionLabel = new Label { Text = ReleaseVersion.Display, ForeColor = Color.Silver,
             AutoSize = true, Location = new Point(228, 462) };
         Controls.Add(versionLabel);
-        address = AddField("HA-Adresse", previous == null ? "http://homeassistant.local:8123" : previous.Url, 24);
+        address = AddField("HA-Adresse", previous == null ? "" : previous.Url, 24);
         token = AddField(previous == null ? "Zugriffstoken" : "Zugriffstoken (optional)", "", 60);
         token.UseSystemPasswordChar = true;
         if (previous != null)
             connection.Controls.Add(new Label { Text = "Leer lassen, um den gespeicherten Token zu behalten.",
                 ForeColor = Color.Silver, AutoSize = true, Location = new Point(12, 87) });
+        if (previous == null)
+            connection.Controls.Add(new Label { Text = "Solar-Sensoren sind optional.", ForeColor = Color.Silver,
+                AutoSize = true, Location = new Point(12, 87) });
         string[] labels = { "Solarerzeugung", "Akkustand", "Hausverbrauch", "Netzleistung / Netzbezug" };
         for (int i = 0; i < 4; i++)
-            entities[i] = AddField(labels[i], (previous == null ? Settings.Defaults : previous.Entities)[i], 110 + i * 36, i == 1 ? "%" : "W");
+            entities[i] = AddField(labels[i], previous == null ? "" : previous.Entities[i], 110 + i * 36, i == 1 ? "%" : "W");
         gridExport = AddField("Netzeinspeisung (optional)",
-            previous == null ? "sensor.export_power" : previous.GridExportEntity ?? "", 254, "W");
+            previous == null ? "" : previous.GridExportEntity ?? "", 254, "W");
         var save = new Button { Text = "Speichern", Bounds = new Rectangle(764, 456, 100, 30) };
         var cancel = new Button { Text = "Abbrechen", Bounds = new Rectangle(656, 456, 100, 30), DialogResult = DialogResult.Cancel };
         StyleButton(save);
@@ -673,8 +672,8 @@ sealed class Options : Form
             for (int i = 0; i < entities.Length; i++)
             {
                 string entity = entities[i].Text.Trim().ToLowerInvariant();
-                if (!Regex.IsMatch(entity, @"^[a-z0-9_]+\.[a-z0-9_]+$"))
-                    throw new ArgumentException("Bitte vier gültige Entitäts-IDs eingeben.");
+                if (entity.Length != 0 && !Regex.IsMatch(entity, @"^[a-z0-9_]+\.[a-z0-9_]+$"))
+                    throw new ArgumentException("Bitte gültige Entitäts-IDs eingeben oder ungenutzte Felder leer lassen.");
                 next.Entities[i] = entity;
             }
 
@@ -731,9 +730,9 @@ sealed class SolarTile : Form
     bool exiting;
     readonly ContextMenuStrip trayMenu = new WidgetMenu();
     static readonly string WidgetsFile = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SolarKachel", "widgets.txt");
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), ReleaseVersion.DataFolder, "widgets.txt");
     static readonly string PositionFile = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SolarKachel", "position.txt");
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), ReleaseVersion.DataFolder, "position.txt");
 
     internal SolarTile(bool demo)
     {
@@ -796,6 +795,11 @@ sealed class SolarTile : Form
             PopulateSensorMenu();
             trayMenu.Items.Add(addWidget);
             trayMenu.Items.Add("Einstellungen", null, delegate { Configure(); });
+            trayMenu.Items.Add("Einstellungen sichern…", null, delegate { ProfileBackup.Export(this, settings); });
+            trayMenu.Items.Add("Einstellungen wiederherstellen…", null, delegate
+            {
+                if (ProfileBackup.Import(this, settings)) ExitWidgets();
+            });
             trayMenu.Items.Add("Programm beenden", null, delegate { ExitWidgets(); });
             tray = new NotifyIcon { Icon = WidgetIcon.Load(), Text = ReleaseVersion.ProductName, ContextMenuStrip = trayMenu };
             tray.DoubleClick += delegate { Configure(); };
@@ -819,8 +823,14 @@ sealed class SolarTile : Form
         liveTimer.Tick += async delegate { await RefreshLive(); };
         liveTimer.Start();
         StartLive();
-        if (settings == null) return;
-        string[] active = DoorWidget.HasSavedDoors() ? new[] { "solar", "doors" } : new[] { "solar" };
+        if (settings == null)
+        {
+#if STORE
+            BeginInvoke(new Action(delegate { Configure(); }));
+#endif
+            return;
+        }
+        string[] active = new string[0];
         try { if (File.Exists(WidgetsFile)) active = File.ReadAllLines(WidgetsFile); }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
@@ -1306,6 +1316,7 @@ sealed class SolarTile : Form
 
     async Task<Tuple<double?, string>> Read(Settings current, string entity, int index, string token)
     {
+        if (string.IsNullOrEmpty(entity)) return Tuple.Create<double?, string>(null, "Sensor in den Einstellungen auswählen.");
         try
         {
             using (var request = new HttpRequestMessage(HttpMethod.Get, current.Url.TrimEnd('/') + "/api/states/" + Uri.EscapeDataString(entity)))

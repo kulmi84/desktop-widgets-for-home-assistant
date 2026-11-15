@@ -20,7 +20,7 @@ sealed class HeatingWidget : Form
     static string ConfigFile(bool cover)
     {
         return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "SolarKachel", cover ? "covers.json" : "heating.json");
+            ReleaseVersion.DataFolder, cover ? "covers.json" : "heating.json");
     }
     readonly string positionFile;
     readonly Func<Settings> connection;

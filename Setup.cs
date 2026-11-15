@@ -109,7 +109,7 @@ static class Setup
         using (var key = Registry.CurrentUser.CreateSubKey(RegistryPath))
         {
             key.SetValue("DisplayName", Title);
-            key.SetValue("DisplayVersion", ReleaseVersion.Version + " (Build " + ReleaseVersion.Build + ")");
+            key.SetValue("DisplayVersion", ReleaseVersion.Version);
             key.SetValue("DisplayIcon", Program);
             key.SetValue("InstallLocation", InstallDir);
             key.SetValue("UninstallString", "\"" + Maintenance + "\" --uninstall");

@@ -16,21 +16,15 @@ Sensoren lassen sich aus Home Assistant auswählen. Die Widgets bieten eine Live
 
 ## Screenshots
 
-Alle Anzeigen verwenden Beispieldaten.
+Die Bilder zeigen die Widgets mit Beispieldaten.
 
-| Solar | Fenster-Tür-Sensoren |
-| --- | --- |
-| ![Solar-Widget mit PV-Leistung, Akku, Hausverbrauch und Netzleistung](docs/screenshots/01-solar.png) | ![Garagentor, offene Haustür und geschlossenes Fenster](docs/screenshots/02-fenster-tueren.png) |
+![Solar, Fenster-Tür-Sensoren und Schalter](docs/screenshots/widgets-uebersicht.png)
 
-**Schalter in senkrechter Anordnung**
+![Heizung, Rollläden und frei konfigurierbare Sensoren](docs/screenshots/widgets-steuerung-und-sensoren.png)
 
-![Drei Schalter mit Ein- und Aus-Zuständen](docs/screenshots/03-schalter.png)
+## Einstellungen sichern
 
-![Heizungs-Widget mit Isttemperatur und Plus- und Minus-Tasten](docs/screenshots/04-heizung.png)
-
-![Rollladen-Widget mit Hoch- und Runter-Tasten sowie Schließgrad](docs/screenshots/05-rolllaeden.png)
-
-![Sensor-Kachel mit Außentemperatur und Luftfeuchtigkeit](docs/screenshots/06-sensoren.png)
+Im Rechtsklickmenü des Programm-Icons exportiert **Einstellungen sichern…** die Widget-Konfiguration, Positionen und Solar-Sensorzuordnungen als JSON-Datei. Die Home-Assistant-Adresse und der Zugriffstoken bleiben lokal. Zielinstallation zuerst mit Home Assistant verbinden, dann **Einstellungen wiederherstellen…** wählen und die App erneut starten.
 
 ## Bauen und starten
 
@@ -41,3 +35,12 @@ In den Einstellungen die eigene Home-Assistant-Adresse und einen langlebigen Zug
 ## Symbole
 
 Die Material Design Icons von Pictogrammers unterliegen [Apache 2.0](MDI-LICENSE.txt). Die verwendeten Symbole sind in [MDI-NOTICE.txt](MDI-NOTICE.txt) aufgeführt.
+## Microsoft Store
+
+Die Store-Ausgabe **1.2.0** verwendet das MSIX-Paket **1.2.0.0**. Beim ersten Start öffnet sie die Einrichtung mit leeren Feldern. Nach dem Verbinden lassen sich Widgets über das Programm-Icon im Infobereich hinzufügen. Die Store-Ausgabe verwendet ein eigenes lokales Profil.
+
+Zum Paketieren mit dem Windows SDK die Paketidentität und die Herausgeberdaten aus Partner Center verwenden:
+
+    powershell -NoProfile -File Store\Build-Msix.ps1 -IdentityName "PAKETNAME" -Publisher "CN=HERAUSGEBER-ID" -PublisherDisplayName "HERAUSGEBERNAME"
+
+Das Paket liegt anschließend im Ordner artifacts. Die lokale Vorschauidentität dient zur Buildprüfung. Für die Veröffentlichung das Paket mit den zugewiesenen Identitätsdaten neu bauen und in Partner Center einreichen.

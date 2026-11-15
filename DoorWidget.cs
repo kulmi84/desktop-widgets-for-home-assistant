@@ -122,7 +122,7 @@ sealed class DoorWidget : Form
     internal static string ConfigPath(bool switches)
     {
         return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "SolarKachel", switches ? "switches.json" : "doors.json");
+            ReleaseVersion.DataFolder, switches ? "switches.json" : "doors.json");
     }
 
     internal static Appearance SavedStyle(bool switches)
