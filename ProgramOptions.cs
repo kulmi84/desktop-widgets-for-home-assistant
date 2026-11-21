@@ -20,7 +20,7 @@ sealed class ProgramOptions : Form
         DwmSetWindowAttribute(Handle, 20, ref dark, sizeof(int));
     }
 
-    internal ProgramOptions(Func<Settings> getSettings, Action connect, Action restored)
+    internal ProgramOptions(Func<Settings> getSettings, Action connect, Action restored, Action<bool> revealWidgets = null)
     {
         Text = ReleaseVersion.ProductName + UiText.Get(" – Programmeinstellungen", " – Application settings");
         Icon = WidgetIcon.Load();
@@ -29,7 +29,7 @@ sealed class ProgramOptions : Form
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterScreen;
         MaximizeBox = MinimizeBox = ShowInTaskbar = false;
-        ClientSize = new Size(486, 300);
+        ClientSize = new Size(486, 330);
         BackColor = SettingsTheme.Surface;
         ForeColor = Color.FromArgb(239, 239, 242);
 
@@ -44,7 +44,7 @@ sealed class ProgramOptions : Form
             DialogResult = DialogResult.OK;
             restored();
         });
-        var startup = Group(UiText.Get("Allgemeine Einstellungen", "General settings"), 148, 96);
+        var startup = Group(UiText.Get("Allgemeine Einstellungen", "General settings"), 148, 126);
 #if STORE
         AddButton(startup, UiText.Get("Windows-Autostart öffnen", "Open Windows startup settings"), 14, 19, 202, () =>
         {
@@ -84,6 +84,12 @@ sealed class ProgramOptions : Form
         startup.Controls.Add(checkbox);
 #endif
         AddLanguagePicker(startup);
+        var reveal = new CheckBox { Text = UiText.Get("Ausgeblendete Widgets zum Bearbeiten anzeigen",
+            "Show hidden widgets for editing"), AutoSize = true, Checked = true, Location = new Point(15, 94) };
+        reveal.CheckedChanged += delegate { if (revealWidgets != null) revealWidgets(reveal.Checked); };
+        startup.Controls.Add(reveal);
+        Shown += delegate { if (revealWidgets != null) revealWidgets(reveal.Checked); };
+        FormClosed += delegate { if (revealWidgets != null) revealWidgets(false); };
         var footer = new Panel { Dock = DockStyle.Bottom, Height = 44 };
         footer.Paint += delegate(object sender, PaintEventArgs args)
         {

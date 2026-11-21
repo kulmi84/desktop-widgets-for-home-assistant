@@ -66,6 +66,7 @@ sealed class DoorSettings
     public DoorPosition Position { get; set; }
     public Appearance Appearance { get; set; }
     public bool OnlyWhenOpen { get; set; }
+    public bool OnlyOpenContacts { get; set; }
 }
 
 sealed class DoorWidget : Form
@@ -80,10 +81,14 @@ sealed class DoorWidget : Form
     readonly string instanceId;
     bool IsSensorWidget { get { return instanceId != null && !switches; } }
     bool IsContactWidget { get { return !switches && instanceId == null; } }
-    bool ConditionalVisibility { get { return IsContactWidget && config.OnlyWhenOpen; } }
+    bool ConditionalVisibility { get { return IsContactWidget && (config.OnlyWhenOpen || config.OnlyOpenContacts); } }
     internal bool ContactsEnabled { get; private set; }
     internal event Action ContactsDisabled;
     bool editingContacts;
+    bool revealForSettings;
+    WidgetAttention attention;
+    bool contactConditionActive;
+    bool PreviewHiddenContacts { get { return revealForSettings && ConditionalVisibility && !AnyContactOpen(lastStates); } }
     internal static readonly string SensorTitle = UiText.Get("Sensoren", "Sensors");
     internal string WidgetName { get { return config.Name ?? (switches ? SwitchTitle : SensorTitle); } }
 
@@ -226,6 +231,7 @@ sealed class DoorWidget : Form
             string placementId = instanceId != null ? (switches ? "switch:" : "sensor:") + instanceId : switches ? "switches" : "doors";
             placement = new WidgetPlacement(this, placementId, fallback,
                 horizontalAnchor: () => config.Appearance == null ? HorizontalAnchor.Right : config.Appearance.HorizontalAnchor);
+            attention = new WidgetAttention(this, () => config.Appearance, () => Render(config.Doors, lastStates));
             if (config.Doors.Length == 0 && !editingContacts) EditDoors();
             else await RefreshDoors();
         };
@@ -248,7 +254,8 @@ sealed class DoorWidget : Form
         {
             if (!dragStart.HasValue || !Capture || pressedSwitch >= 0 || (placement != null && placement.Locked)) return;
             var start = dragStart.Value;
-            Location = new Point(windowStart.X + Cursor.Position.X - start.X, windowStart.Y + Cursor.Position.Y - start.Y);
+            var requested = new Point(windowStart.X + Cursor.Position.X - start.X, windowStart.Y + Cursor.Position.Y - start.Y);
+            Location = placement == null ? requested : placement.DragLocation(requested);
         };
         MouseUp += async delegate(object sender, MouseEventArgs args)
         {
@@ -293,6 +300,7 @@ sealed class DoorWidget : Form
     internal void DisableContacts()
     {
         ContactsEnabled = false;
+        contactConditionActive = false;
         lastStates = null;
         timer.Stop();
         Hide();
@@ -301,19 +309,43 @@ sealed class DoorWidget : Form
 
     internal static bool AnyContactOpen(string[] states)
     {
-        return states != null && states.Any(state => state == "on" || state == "open" ||
-            state == "opening" || state == "closing");
+        return states != null && states.Any(IsContactOpen);
+    }
+
+    static bool IsContactOpen(string state)
+    {
+        return state == "on" || state == "open" || state == "opening" || state == "closing";
+    }
+
+    internal static int[] OpenContactIndices(string[] states)
+    {
+        if (states == null) return new int[0];
+        return Enumerable.Range(0, states.Length).Where(index => IsContactOpen(states[index])).ToArray();
     }
 
     void UpdateContactVisibility()
     {
         if (!IsContactWidget || !ContactsEnabled || editingContacts) return;
-        bool show = !ConditionalVisibility || AnyContactOpen(lastStates);
+        bool conditionActive = ConditionalVisibility && AnyContactOpen(lastStates);
+        bool newlyActive = conditionActive && !contactConditionActive;
+        contactConditionActive = conditionActive;
+        bool show = revealForSettings || !ConditionalVisibility || conditionActive;
         if (show && !Visible) Show();
         else if (!show && Visible) Hide();
+        if (newlyActive && attention != null && !revealForSettings)
+            attention.HoldForeground((config.Appearance ?? new Appearance()).ShowForegroundSeconds);
     }
 
     protected override bool ShowWithoutActivation { get { return ConditionalVisibility; } }
+
+    internal void RevealForSettings(bool reveal)
+    {
+        revealForSettings = reveal;
+        if (!ContactsEnabled || IsDisposed) return;
+        if (reveal) Render(config.Doors, lastStates);
+        UpdateContactVisibility();
+        if (Visible) Render(config.Doors, lastStates);
+    }
 
     int HitSwitch(Point point)
     {
@@ -491,10 +523,10 @@ sealed class DoorWidget : Form
         if (!IsDisposed) await RefreshDoors();
     }
 
-    void Save(Door[] doors, Appearance appearance, string name, bool onlyWhenOpen)
+    void Save(Door[] doors, Appearance appearance, string name, bool onlyWhenOpen, bool onlyOpenContacts)
     {
         var next = new DoorSettings { Name = name ?? config.Name, Doors = doors, Position = config.Position,
-            Appearance = appearance, OnlyWhenOpen = onlyWhenOpen };
+            Appearance = appearance, OnlyWhenOpen = onlyWhenOpen, OnlyOpenContacts = onlyOpenContacts };
         Directory.CreateDirectory(Path.GetDirectoryName(configPath));
         string temp = configPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
@@ -513,6 +545,7 @@ sealed class DoorWidget : Form
         var settings = connection();
         var editor = new DoorEditor(config.Doors, connection, switches, sensors: IsSensorWidget, widgetName: instanceId != null ? WidgetName : null);
         editor.OnlyWhenOpen = config.OnlyWhenOpen;
+        editor.OnlyOpenContacts = config.OnlyOpenContacts;
         using (var dialog = new Options(settings, new string[0], config.Appearance ?? new Appearance(),
             settings == null ? null : settings.Appearance, editor))
         {
@@ -528,7 +561,7 @@ sealed class DoorWidget : Form
                 return;
             }
             try { Save(editor.Doors, dialog.SelectedAppearance, instanceId != null ? editor.WidgetName : null,
-                IsContactWidget && editor.OnlyWhenOpen); }
+                IsContactWidget && editor.OnlyWhenOpen, IsContactWidget && editor.OnlyOpenContacts); }
             catch (Exception)
             {
                 MessageBox.Show(this, UiText.Get("Die Einstellungen konnten nicht gespeichert werden.", "Could not save settings."), Text);
@@ -554,6 +587,17 @@ sealed class DoorWidget : Form
     {
         lastStates = states;
         if (states == null) deviceStates = null;
+        if (IsContactWidget && config.OnlyOpenContacts && !PreviewHiddenContacts)
+        {
+            var indices = OpenContactIndices(states);
+            if (indices.Length == 0)
+            {
+                AccessibleName = Text = DoorTitle;
+                return;
+            }
+            doors = indices.Select(index => doors[index]).ToArray();
+            states = indices.Select(index => states[index]).ToArray();
+        }
         switchBounds = new RectangleF[switches ? Math.Max(1, doors.Length) : 0];
         var names = doors.Length == 0 ? new[] { instanceId != null ? WidgetName : switches ? SwitchTitle : DoorTitle } : doors.Select(door => door.Name).ToArray();
         var values = doors.Length == 0 ? new[] { switches ? UiText.Get("Schalter hinzufügen", "Add switches") : UiText.Get("Sensoren hinzufügen", "Add sensors") } : doors.Select((door, index) =>
@@ -563,13 +607,20 @@ sealed class DoorWidget : Form
         if (opened.Length == 0) opened = new bool[1];
         if (switches && doors.Length == 0) doors = new[] { new Door { IconKind = "Schalter" } };
         float scale = LayeredTile.ScaleFor(this);
+        var paintStyle = config.Appearance ?? new Appearance();
+        if (PreviewHiddenContacts)
+        {
+            paintStyle = new JavaScriptSerializer().Deserialize<Appearance>(
+                new JavaScriptSerializer().Serialize(paintStyle));
+            paintStyle.BackgroundOpacity = 100;
+        }
         using (var bitmap = IsSensorWidget
-            ? PaintSensors(config.Appearance ?? new Appearance(), doors, names, values, scale, 1)
-            : PaintDoors(config.Appearance ?? new Appearance(), names, values, opened, scale, 1, doors, switches ? switchBounds : null))
+            ? PaintSensors(paintStyle, doors, names, values, scale, 1)
+            : PaintDoors(paintStyle, names, values, opened, scale, 1, doors, switches ? switchBounds : null))
         {
             if (placement != null) placement.Resize(bitmap.Size);
             else if (ClientSize != bitmap.Size) ClientSize = bitmap.Size;
-            LayeredTile.Present(Handle, bitmap);
+            LayeredTile.Present(Handle, bitmap, PreviewHiddenContacts ? (byte)128 : (byte)255);
         }
         AccessibleName = Text = (instanceId != null ? WidgetName : switches ? SwitchTitle : DoorTitle) + ": " + string.Join(", ", names.Zip(values, (name, state) => name + " " + state));
         if (DeviceStateChanged != null) DeviceStateChanged();
@@ -726,6 +777,8 @@ sealed class DoorWidget : Form
         readonly TextBox widgetNameInput = new TextBox();
         internal string WidgetName { get { return widgetNameInput.Text.Trim(); } }
         internal bool OnlyWhenOpen { get; set; }
+        internal bool OnlyOpenContacts { get; set; }
+        internal int ShowForegroundSeconds { get; set; }
         internal bool DeviceRows { get { return Heating || Cover; } }
         internal DoorEditor(Door[] doors, Func<Settings> connection, bool switches = false, bool heating = false, bool cover = false, bool sensors = false, string widgetName = null)
         {

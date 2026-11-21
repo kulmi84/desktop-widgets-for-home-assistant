@@ -6,13 +6,18 @@
 
 Unabhängige Windows-App für Home Assistant. Die Widgets liegen frei positionierbar auf dem Desktop. Das Programm-Icon im Infobereich öffnet per Rechtsklick das Menü **Widget hinzufügen**.
 
-**Aktuell ist Version 1.0.1 · Build 1511.2.** Die App ist auf Deutsch und Englisch verfügbar. Die Sprache lässt sich in den Programmeinstellungen wählen.
+**Aktuell ist Version 1.0.1 · Build 2111.2.** Die App ist auf Deutsch und Englisch verfügbar. Die Sprache lässt sich in den Programmeinstellungen wählen.
 
+- **Einzelne Feldbreiten:** In der Live-Vorschau lassen sich die blauen Trennlinien ziehen, um Felder unabhängig voneinander breiter oder schmaler zu machen. Schrift und Symbole behalten ihre Größe. Die Feldbreiten werden pro Widget gespeichert.
+- **Ruhige Messwertanzeige:** Eine feste Breite verhindert Größenänderungen bei wechselnden Werten.
+- **Nur offene Kontakte:** Geschlossene Kontakte können im Fenster-Tür-Widget ausgeblendet werden. Ausgeblendete Widgets lassen sich beim Konfigurieren vorübergehend sichtbar machen.
+- **Aufmerksamkeit nach Wunsch:** Einstellbare Vordergrundintervalle, Blinkanzahl und Blinkdauer sowie eine begrenzte Vordergrundzeit beim Einblenden. Diese Funktionen sind standardmäßig deaktiviert.
+- **Horizontal zentrieren:** Das Rechtsklickmenü kann ein Widget auf dem Bildschirm zentrieren, ohne seine Höhe zu ändern.
 - **Bedingte Sichtbarkeit:** Das Fenster-Tür-Widget kann automatisch erscheinen, sobald mindestens ein Kontakt offen ist.
 - **Feste Ausrichtung:** Pro Widget kann bei einer Breitenänderung die linke Kante, die Mitte oder die rechte Kante fest bleiben.
 - **Positionssperre:** Per Rechtsklick auf eine Kachel lässt sich das Verschieben sperren. Die Einstellung wird pro Widget gespeichert.
 
-English: Customizable Windows desktop widgets for Home Assistant. View sensor readings and control lights, heating and roller shutters. Choose a fixed edge or center for resizing, lock widget positions, and show the window and door widget only when a contact is open.
+English: Customizable Windows desktop widgets for Home Assistant. Drag the blue dividers in the live preview to adjust individual field widths without scaling text or icons. Field widths are saved per widget. View sensor readings and control lights, heating and roller shutters. Choose a fixed edge or center for resizing, lock widget positions, and show the window and door widget only when a contact is open.
 
 - **Solar** zeigt PV-Leistung, Akkustand, Hausverbrauch und Netzleistung.
 - **Fenster-Tür-Sensoren** zeigt Öffnungszustände mit passenden Symbolen für Fenster, Türen und Garagentore.

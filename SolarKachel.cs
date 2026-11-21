@@ -29,6 +29,15 @@ sealed class Appearance
     public bool ValueBesideName { get; set; }
     public int OpenIconColor { get; set; }
     public HorizontalAnchor HorizontalAnchor { get; set; }
+    public int ForegroundMinutes { get; set; }
+    public int ForegroundBlinks { get; set; }
+    public int BlinkCycleSeconds { get; set; }
+    public int ShowForegroundSeconds { get; set; }
+    public bool ForegroundWhileBlinking { get; set; }
+    public bool BackgroundOnAnyClick { get; set; }
+    public bool FixedValueWidth { get; set; }
+    public int[] FieldWidths { get; set; }
+    internal Action<float[], float[], float> ReportFields;
 
     public Appearance()
     {
@@ -42,6 +51,8 @@ sealed class Appearance
         MetricSpacing = 18;
         FramePadding = 14;
         OpenIconColor = Color.Firebrick.ToArgb();
+        BlinkCycleSeconds = 2;
+        FixedValueWidth = true;
     }
 }
 
@@ -112,6 +123,12 @@ sealed class Options : Form
     readonly ComboBox typeface;
     readonly ComboBox horizontalAnchor;
     readonly NumericUpDown opacity;
+    readonly NumericUpDown foregroundMinutes, foregroundBlinks, blinkCycleSeconds;
+    readonly CheckBox foregroundWhileBlinking;
+    readonly ComboBox backgroundClick;
+    readonly CheckBox fixedValueWidth;
+    int[] fieldWidths;
+    Action<float[], float[], float> reportFields;
     internal Settings Result { get; private set; }
 
     internal Appearance SelectedAppearance { get; private set; }
@@ -137,6 +154,7 @@ sealed class Options : Form
         design.ForeColor = connection.ForeColor = ForeColor;
         Controls.AddRange(new Control[] { design, connection });
         var appearance = doorStyle ?? (previous == null ? new Appearance() : previous.Appearance ?? new Appearance());
+        fieldWidths = appearance.FieldWidths == null ? null : (int[])appearance.FieldWidths.Clone();
         background = AddColor(UiText.Get("Hintergrundfarbe", "Background color"), appearance.Background, 23);
         textColor = AddColor(UiText.Get("Schriftfarbe", "Text color"), appearance.Text, 54);
         iconColor = AddColor(UiText.Get("Icon-Farbe", "Icon color"), appearance.Icons, 85);
@@ -171,6 +189,32 @@ sealed class Options : Form
         SelectHorizontalAnchor(appearance.HorizontalAnchor);
         design.Controls.Add(horizontalAnchor);
         AddPickerArrow(horizontalAnchor, UiText.Get("Ausrichtung auswählen", "Select alignment"));
+        foregroundMinutes = AddNumber(UiText.Get("Vordergrund alle (Min., 0 = aus)", "Bring forward every (min, 0 = off)"),
+            appearance.ForegroundMinutes, 0, 1440, 343);
+        foregroundBlinks = AddNumber(UiText.Get("Dabei blinken (Mal, 0 = aus)", "Blink count (0 = off)"),
+            appearance.ForegroundBlinks, 0, 20, 373);
+        blinkCycleSeconds = AddNumber(UiText.Get("Sekunden pro Blinkvorgang", "Seconds per blink cycle"),
+            Math.Max(1, Math.Min(30, appearance.BlinkCycleSeconds)), 1, 30, 403);
+        foregroundWhileBlinking = new CheckBox
+        {
+            Text = UiText.Get("Während des Blinkens im Vordergrund bleiben", "Stay on top while blinking"),
+            AutoSize = true, Checked = appearance.ForegroundWhileBlinking, Location = new Point(14, 435)
+        };
+        design.Controls.Add(foregroundWhileBlinking);
+        design.Controls.Add(new Label { Text = UiText.Get("Danach in den Hintergrund", "Return to background"),
+            AutoSize = true, Location = new Point(14, 464) });
+        backgroundClick = new DarkFontPicker { Bounds = new Rectangle(14, 486, 368, 26),
+            DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Input, ForeColor = ForeColor,
+            FlatStyle = FlatStyle.Flat, AccessibleName = UiText.Get("Danach in den Hintergrund", "Return to background") };
+        backgroundClick.Items.AddRange(new object[] {
+            UiText.Get("Klick auf den Programmtitel", "Click the program title"),
+            UiText.Get("Klick irgendwo ins Fenster", "Click anywhere in a window") });
+        backgroundClick.SelectedIndex = appearance.BackgroundOnAnyClick ? 1 : 0;
+        design.Controls.Add(backgroundClick);
+        AddPickerArrow(backgroundClick, backgroundClick.AccessibleName);
+        fixedValueWidth = new CheckBox { Text = UiText.Get("Feste Breite für wechselnde Werte", "Fixed width for changing values"),
+            AutoSize = true, Checked = appearance.FixedValueWidth, Location = new Point(14, 519) };
+        design.Controls.Add(fixedValueWidth);
         var reset = new SettingsButton { Text = UiText.Get("Standard wiederherstellen", "Restore defaults"), AutoSize = true, Location = new Point(14, 489) };
         reset.Click += delegate
         {
@@ -185,6 +229,13 @@ sealed class Options : Form
             spacing.Value = defaults.MetricSpacing;
             padding.Value = defaults.FramePadding;
             SelectHorizontalAnchor(defaults.HorizontalAnchor);
+            foregroundMinutes.Value = defaults.ForegroundMinutes;
+            foregroundBlinks.Value = defaults.ForegroundBlinks;
+            blinkCycleSeconds.Value = defaults.BlinkCycleSeconds;
+            foregroundWhileBlinking.Checked = defaults.ForegroundWhileBlinking;
+            backgroundClick.SelectedIndex = defaults.BackgroundOnAnyClick ? 1 : 0;
+            fixedValueWidth.Checked = defaults.FixedValueWidth;
+            fieldWidths = null;
         };
         StyleButton(reset);
         Controls.Add(reset);
@@ -212,12 +263,18 @@ sealed class Options : Form
         if (doorStyle == null)
         {
             save.Click += Save;
-            AddCopyMenu(design, new Point(14, 341), "Solar", null, ApplyStyle);
+            AddCopyMenu(design, new Point(14, 553), "Solar", null, ApplyStyle);
         }
         Controls.AddRange(new Control[] { save, cancel });
         var previewGroup = new SettingsCard { Text = UiText.Get("Live-Vorschau", "Live preview"), ForeColor = ForeColor,
             Bounds = new Rectangle(12, 395, 852, 86) };
         var preview = new PreviewPanel(ReadAppearance, values) { Bounds = new Rectangle(10, 20, 832, 56) };
+        reportFields = preview.RecordFields;
+        preview.ResizeField = delegate(int index, int width, int[] measured)
+        {
+            if (fieldWidths == null || fieldWidths.Length != measured.Length) fieldWidths = (int[])measured.Clone();
+            fieldWidths[index] = width;
+        };
         previewGroup.Controls.Add(preview);
         Controls.Add(previewGroup);
         foreach (var sample in new[] { background, textColor, iconColor })
@@ -246,15 +303,40 @@ sealed class Options : Form
                 Location = new Point(doorEditor.Switches ? 160 : 16, 284) };
             connection.Controls.Add(showOpen);
             CheckBox onlyWhenOpen = null;
+            CheckBox onlyOpenContacts = null;
             if (!doorEditor.Switches && !doorEditor.Sensors && !doorEditor.DeviceRows)
             {
+                doorEditor.ShowForegroundSeconds = appearance.ShowForegroundSeconds;
                 onlyWhenOpen = new CheckBox
                 {
                     Text = UiText.Get("Nur anzeigen, wenn mindestens ein Kontakt offen ist", "Show only when at least one contact is open"),
                     AutoSize = true, Checked = doorEditor.OnlyWhenOpen, Location = new Point(16, 311)
                 };
                 connection.Controls.Add(onlyWhenOpen);
-                connection.Height += 27;
+                onlyOpenContacts = new CheckBox
+                {
+                    Text = UiText.Get("Nur offene Kontakte anzeigen", "Show only open contacts"),
+                    AutoSize = true, Checked = doorEditor.OnlyOpenContacts, Location = new Point(16, 338)
+                };
+                connection.Controls.Add(onlyOpenContacts);
+                var showForeground = new NumericUpDown { Minimum = 0, Maximum = 3600,
+                    Value = Math.Max(0, Math.Min(3600, appearance.ShowForegroundSeconds)),
+                    BackColor = Input, ForeColor = ForeColor, Bounds = new Rectangle(560, 366, 80, 25),
+                    AccessibleName = UiText.Get("Beim Einblenden im Vordergrund (Sek., 0 = aus)",
+                        "On reveal, stay on top (sec, 0 = off)") };
+                connection.Controls.Add(new Label { Text = showForeground.AccessibleName,
+                    Bounds = new Rectangle(16, 367, 535, 24), TextAlign = ContentAlignment.MiddleLeft });
+                connection.Controls.Add(showForeground);
+                showForeground.ValueChanged += delegate { doorEditor.ShowForegroundSeconds = (int)showForeground.Value; };
+                reset.Click += delegate { showForeground.Value = new Appearance().ShowForegroundSeconds; };
+                connection.Height += 81;
+                design.Height += 27;
+                previewGroup.Top += 27;
+                save.Top += 27;
+                cancel.Top += 27;
+                reset.Top += 27;
+                versionLabel.Top += 27;
+                ClientSize = new Size(ClientSize.Width, ClientSize.Height + 27);
             }
             if (doorEditor.DeviceRows || doorEditor.Sensors) { showOpen.Hide(); sample.Hide(); connection.Controls[connection.Controls.IndexOf(sample) - 1].Hide(); }
             var vertical = new CheckBox { Text = UiText.Get("Untereinander", "Stack vertically"), AutoSize = true,
@@ -275,6 +357,13 @@ sealed class Options : Form
                     sample.BackColor = Color.FromArgb(source.OpenIconColor);
                     vertical.Checked = source.Vertical;
                     beside.Checked = source.ValueBesideName;
+                    if (onlyWhenOpen != null)
+                    {
+                        var revealDuration = connection.Controls.OfType<NumericUpDown>().FirstOrDefault();
+                        if (revealDuration != null)
+                            revealDuration.Value = Math.Max(revealDuration.Minimum,
+                                Math.Min(revealDuration.Maximum, source.ShowForegroundSeconds));
+                    }
                 });
             reset.Click += delegate { sample.BackColor = Color.FromArgb(new Appearance().OpenIconColor); };
             preview.Tile = scale =>
@@ -307,13 +396,23 @@ sealed class Options : Form
             {
                 if (!doorEditor.SaveRows()) return;
                 if (onlyWhenOpen != null) doorEditor.OnlyWhenOpen = onlyWhenOpen.Checked;
+                if (onlyOpenContacts != null) doorEditor.OnlyOpenContacts = onlyOpenContacts.Checked;
                 SelectedAppearance = ReadAppearance();
                 SelectedAppearance.OpenIconColor = sample.BackColor.ToArgb();
                 SelectedAppearance.Vertical = vertical.Checked;
                 SelectedAppearance.ValueBesideName = doorEditor.Sensors && beside.Checked;
+                if (onlyWhenOpen != null) SelectedAppearance.ShowForegroundSeconds = doorEditor.ShowForegroundSeconds;
                 DialogResult = DialogResult.OK;
             };
         }
+        design.Height = Math.Max(design.Height + 210, doorStyle == null ? 591 : 557);
+        previewGroup.Top += 210;
+        save.Top += 210;
+        cancel.Top += 210;
+        reset.Top += 210;
+        versionLabel.Top += 210;
+        ClientSize = new Size(ClientSize.Width, ClientSize.Height + 210);
+        fixedValueWidth.CheckedChanged += delegate { preview.Invalidate(); };
         if (connectionOnly)
         {
             Text = UiText.Get("Home Assistant – Verbindung", "Home Assistant connection");
@@ -345,6 +444,13 @@ sealed class Options : Form
         spacing.Value = source.MetricSpacing;
         padding.Value = source.FramePadding;
         SelectHorizontalAnchor(source.HorizontalAnchor);
+        foregroundMinutes.Value = Math.Max(foregroundMinutes.Minimum, Math.Min(foregroundMinutes.Maximum, source.ForegroundMinutes));
+        foregroundBlinks.Value = Math.Max(foregroundBlinks.Minimum, Math.Min(foregroundBlinks.Maximum, source.ForegroundBlinks));
+        blinkCycleSeconds.Value = Math.Max(1, Math.Min(30, source.BlinkCycleSeconds));
+        foregroundWhileBlinking.Checked = source.ForegroundWhileBlinking;
+        backgroundClick.SelectedIndex = source.BackgroundOnAnyClick ? 1 : 0;
+        fixedValueWidth.Checked = source.FixedValueWidth;
+        fieldWidths = source.FieldWidths == null ? null : (int[])source.FieldWidths.Clone();
     }
 
     void SelectHorizontalAnchor(HorizontalAnchor anchor)
@@ -604,7 +710,16 @@ sealed class Options : Form
             IconSize = (int)iconSize.Value,
             MetricSpacing = (int)spacing.Value,
             FramePadding = (int)padding.Value,
-            HorizontalAnchor = (HorizontalAnchor)horizontalAnchor.SelectedIndex
+            HorizontalAnchor = (HorizontalAnchor)horizontalAnchor.SelectedIndex,
+            ForegroundMinutes = (int)foregroundMinutes.Value,
+            ForegroundBlinks = (int)foregroundBlinks.Value,
+            BlinkCycleSeconds = (int)blinkCycleSeconds.Value,
+            ForegroundWhileBlinking = foregroundWhileBlinking.Checked,
+            BackgroundOnAnyClick = backgroundClick.SelectedIndex == 1,
+            FixedValueWidth = fixedValueWidth.Checked,
+            FieldWidths = fieldWidths == null ? null : (int[])fieldWidths.Clone(),
+            ReportFields = reportFields,
+            ShowForegroundSeconds = previous != null && previous.Appearance != null ? previous.Appearance.ShowForegroundSeconds : 0
         };
     }
 
@@ -829,6 +944,7 @@ sealed class SolarTile : Form
                 ApplyAppearance();
                 placement = new WidgetPlacement(this, "solar", LegacyPosition(),
                     horizontalAnchor: () => appearance.HorizontalAnchor);
+                new WidgetAttention(this, () => appearance, RenderTile);
                 if (settings != null) await RefreshValues();
             };
             timer.Tick += async delegate { await RefreshValues(); };
@@ -1170,6 +1286,7 @@ sealed class SolarTile : Form
         float right = inset;
         float widest = 0;
         float textHeight;
+        var fieldWidths = new float[values.Length];
         using (var measureBitmap = new Bitmap(1, 1))
         using (var measure = Graphics.FromImage(measureBitmap))
         using (var labelFont = CreateTileFont(appearance.Typeface, Math.Max(7, size - 1) * scale, FontStyle.Regular))
@@ -1181,17 +1298,23 @@ sealed class SolarTile : Form
             {
                 metricStarts[i] = right;
                 float captionWidth = measure.MeasureString(captions[i], namesOnly ? valueFont : labelFont, int.MaxValue, StringFormat.GenericTypographic).Width;
-                float valueWidth = measure.MeasureString(values[i], valueFont, int.MaxValue, StringFormat.GenericTypographic).Width;
+                float valueWidth = measure.MeasureString(appearance.FixedValueWidth ? "-999,99 kW" : values[i],
+                    valueFont, int.MaxValue, StringFormat.GenericTypographic).Width;
                 float textWidth = valueBesideName ? captionWidth + 8 * scale + valueWidth
                     : Math.Max(captionWidth, namesOnly ? 0 : valueWidth);
                 float itemWidth = icon + iconTextGap + (float)Math.Ceiling(textWidth) + 2 * scale;
+                if (appearance.FieldWidths != null && i < appearance.FieldWidths.Length && appearance.FieldWidths[i] > 0)
+                    itemWidth = Math.Max(icon + iconTextGap + 12 * scale, appearance.FieldWidths[i] * scale);
                 widest = Math.Max(widest, itemWidth);
+                fieldWidths[i] = itemWidth;
                 right += itemWidth + gap;
             }
         }
         float row = Math.Max(icon, textHeight + 2 * scale);
         int width = (int)Math.Ceiling(appearance.Vertical ? widest + inset * 2 : right - gap + inset);
         int height = (int)Math.Ceiling(inset * 2 + (appearance.Vertical ? row * values.Length + gap * (values.Length - 1) : row));
+        if (appearance.ReportFields != null && !appearance.Vertical)
+            appearance.ReportFields(metricStarts, fieldWidths, scale);
         var bitmap = new Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
         try
         {
@@ -1237,6 +1360,11 @@ sealed class SolarTile : Form
                         : opacity == 0
                             ? System.Drawing.Text.TextRenderingHint.SingleBitPerPixelGridFit
                             : System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+                    var textState = g.Save();
+                    float textRight = appearance.Vertical || i + 1 == values.Length ? width - inset :
+                        metricStarts[i + 1] - gap;
+                    g.SetClip(new RectangleF(textLeft, 0, Math.Max(1, textRight - textLeft), height),
+                        CombineMode.Intersect);
                     g.DrawString(captions[i], namesOnly ? valueFont : labelFont, text, textLeft, (float)Math.Round(top), StringFormat.GenericTypographic);
                     if (valueBesideName)
                     {
@@ -1246,6 +1374,7 @@ sealed class SolarTile : Form
                     }
                     else if (!namesOnly) g.DrawString(values[i], valueFont, text, textLeft, (float)Math.Round(top + labelHeight + 2 * scale),
                         StringFormat.GenericTypographic);
+                    g.Restore(textState);
                     g.PixelOffsetMode = PixelOffsetMode.HighQuality;
                 }
             }
@@ -1272,7 +1401,8 @@ sealed class SolarTile : Form
         {
             if (dragSource != control || !control.Capture || (placement != null && placement.Locked)) return;
             Point point = Cursor.Position;
-            Location = new Point(windowStart.X + point.X - pointerStart.X, windowStart.Y + point.Y - pointerStart.Y);
+            var requested = new Point(windowStart.X + point.X - pointerStart.X, windowStart.Y + point.Y - pointerStart.Y);
+            Location = placement == null ? requested : placement.DragLocation(requested);
         };
         control.MouseUp += delegate
         {
@@ -1311,12 +1441,19 @@ sealed class SolarTile : Form
         catch (UnauthorizedAccessException) { }
     }
 
+    ProgramOptions programOptions;
+
     void OpenProgramOptions()
     {
-        bool restore = false;
-        using (var dialog = new ProgramOptions(() => settings, () => Configure(connectionOnly: true), () => restore = true))
-            dialog.ShowDialog();
-        if (restore) ExitWidgets();
+        if (programOptions != null && !programOptions.IsDisposed)
+        {
+            programOptions.Activate();
+            return;
+        }
+        programOptions = new ProgramOptions(() => settings, () => Configure(connectionOnly: true), ExitWidgets,
+            reveal => { if (doors != null) doors.RevealForSettings(reveal); });
+        programOptions.FormClosed += delegate { programOptions = null; };
+        programOptions.Show();
     }
 
     bool Configure(bool connectionOnly = false)
@@ -1527,12 +1664,30 @@ sealed class SolarTile : Form
                     WidgetPlacement.KeepOnScreen(new Point(990, 990), new Size(400, 66),
                     new Rectangle(0, 0, 1000, 1000)) != new Point(600, 934)) return 1;
                 var starts = new float[4];
-                using (var preview = PaintTile(new Appearance { BackgroundOpacity = 0, MetricSpacing = 0 }, tile.values, 1, 0, starts))
+                using (var preview = PaintTile(new Appearance { BackgroundOpacity = 0, MetricSpacing = 0, FixedValueWidth = false }, tile.values, 1, 0, starts))
                     if (preview.GetPixel(preview.Width / 2, 2).A != 0 || preview.Width >= 430) return 1;
+                using (var smallReading = PaintTile(new Appearance(), new[] { "1 W", "6 %", "40 W", "0 W" }, 1, 0, new float[4]))
+                using (var largeReading = PaintTile(new Appearance(), new[] { "9,99 kW", "100 %", "1.000 W", "-999 W" }, 1, 0, new float[4]))
+                    if (smallReading.Size != largeReading.Size) return 1;
+                var customFields = new Appearance { FieldWidths = new[] { 80, 60, 90, 70 } };
+                var beforeFields = new float[4];
+                var afterFields = new float[4];
+                using (var before = PaintTile(customFields, tile.values, 1, 0, beforeFields))
+                {
+                    customFields.FieldWidths[1] += 25;
+                    using (var after = PaintTile(customFields, tile.values, 1, 0, afterFields))
+                        if (after.Width != before.Width + 25 || afterFields[1] != beforeFields[1] ||
+                            afterFields[2] != beforeFields[2] + 25 || after.Height != before.Height) return 1;
+                }
+                var restoredFields = new JavaScriptSerializer().Deserialize<Appearance>(new JavaScriptSerializer().Serialize(customFields));
+                if (!restoredFields.FieldWidths.SequenceEqual(customFields.FieldWidths)) return 1;
                 var door = new Door { Open = "Auf", Closed = "Zu" };
                 if (door.Describe("on") != "Auf" || door.Describe("closed") != "Zu" ||
                     door.Describe("unavailable") != UiText.Get("Nicht verfügbar", "Unavailable")) return 1;
                 using (var doorWidget = new DoorWidget(() => null, false)) { }
+                if (!DoorWidget.OpenContactIndices(new[] { "off", "on", "closed", "open", "unknown", "unavailable" })
+                    .SequenceEqual(new[] { 1, 3 }) || DoorWidget.OpenContactIndices(null).Length != 0 ||
+                    DoorWidget.OpenContactIndices(new[] { "closed", "off" }).Length != 0) return 1;
                 if (WidgetPlacement.LeftAfterResize(100, 200, 250, HorizontalAnchor.Left) != 100 ||
                     WidgetPlacement.LeftAfterResize(100, 200, 250, HorizontalAnchor.Right) != 50 ||
                     WidgetPlacement.LeftAfterResize(100, 200, 251, HorizontalAnchor.Center) != 75 ||
@@ -1578,6 +1733,19 @@ sealed class SolarTile : Form
                             new WidgetPlacement(lockTestForm, "test-other-widget", expected, heatPosition).Locked) return 1;
                         menu.Items[0].PerformClick();
                         if (new WidgetPlacement(lockTestForm, "test-lock", expected, heatPosition).Locked) return 1;
+                        lockTestForm.Location = expected;
+                        menu.Items[1].PerformClick();
+                        var area = Screen.FromRectangle(lockTestForm.Bounds).WorkingArea;
+                        if (lockTestForm.Top != expected.Y ||
+                            lockTestForm.Left != WidgetPlacement.CenteredLeft(area, lockTestForm.Width)) return 1;
+                        placement.Resize(new Size(lockTestForm.ClientSize.Width + 21, lockTestForm.ClientSize.Height));
+                        if (lockTestForm.Left != WidgetPlacement.CenteredLeft(area, lockTestForm.Width) ||
+                            placement.DragLocation(new Point(0, expected.Y + 10)).Y != expected.Y + 10 ||
+                            placement.DragLocation(Point.Empty).X != lockTestForm.Left) return 1;
+                        var restoredPlacement = new WidgetPlacement(lockTestForm, "test-lock", Point.Empty, heatPosition);
+                        if (restoredPlacement.DragLocation(Point.Empty).X != lockTestForm.Left) return 1;
+                        menu.Items[1].PerformClick();
+                        if (placement.DragLocation(new Point(10, 20)) != new Point(10, 20)) return 1;
                     }
                 }
                 finally { File.Delete(heatPosition); }
@@ -1650,6 +1818,65 @@ sealed class SolarTile : Form
 
 sealed class PreviewPanel : Control
 {
+    internal Action<int, int, int[]> ResizeField;
+    float[] fieldStarts = new float[0], fieldSizes = new float[0];
+    float fieldScale = 1, dragScale = 1;
+    Point imageOrigin;
+    Size imageSize;
+    int draggingField = -1, dragX, initialWidth;
+    int[] measuredWidths = new int[0];
+
+    internal void RecordFields(float[] starts, float[] sizes, float scale)
+    {
+        fieldStarts = (float[])starts.Clone();
+        fieldSizes = (float[])sizes.Clone();
+        fieldScale = scale;
+    }
+
+    int FieldAt(Point point)
+    {
+        if (point.Y < imageOrigin.Y || point.Y > imageOrigin.Y + imageSize.Height) return -1;
+        for (int i = 0; i < fieldStarts.Length; ++i)
+            if (Math.Abs(point.X - imageOrigin.X - fieldStarts[i] - fieldSizes[i]) <= 6) return i;
+        return -1;
+    }
+
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        base.OnMouseDown(e);
+        if (e.Button != MouseButtons.Left || ResizeField == null) return;
+        draggingField = FieldAt(e.Location);
+        if (draggingField < 0) return;
+        measuredWidths = fieldSizes.Select(width => (int)Math.Round(width / fieldScale)).ToArray();
+        initialWidth = measuredWidths[draggingField];
+        dragX = e.X;
+        dragScale = fieldScale;
+        Capture = true;
+    }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        base.OnMouseMove(e);
+        Cursor = draggingField >= 0 || FieldAt(e.Location) >= 0 ? Cursors.SizeWE : Cursors.Default;
+        if (draggingField < 0 || !Capture) return;
+        ResizeField(draggingField, Math.Max(36, Math.Min(800,
+            initialWidth + (int)Math.Round(2 * (e.X - dragX) / dragScale))), measuredWidths);
+        Invalidate();
+    }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        base.OnMouseUp(e);
+        draggingField = -1;
+        Capture = false;
+    }
+
+    protected override void OnMouseCaptureChanged(EventArgs e)
+    {
+        base.OnMouseCaptureChanged(e);
+        if (!Capture) draggingField = -1;
+    }
+
     readonly Func<Appearance> readAppearance;
     internal Func<float, Bitmap> Tile { get; set; }
     readonly string[] values;
@@ -1661,6 +1888,7 @@ sealed class PreviewPanel : Control
         DoubleBuffered = true;
         ResizeRedraw = true;
         AccessibleName = UiText.Get("Live-Vorschau für ", "Live preview for ") + ReleaseVersion.SolarName;
+        AccessibleDescription = UiText.Get("Feldbreiten durch Ziehen der blauen Trennlinien ändern.", "Drag the blue dividers to resize individual fields.");
     }
 
     protected override void OnPaint(PaintEventArgs args)
@@ -1673,17 +1901,36 @@ sealed class PreviewPanel : Control
                 for (int x = y / cell % 2 * cell; x < Width; x += cell * 2)
                     g.FillRectangle(light, x, y, cell, cell);
         float scale = g.DpiX / 96f;
+        fieldStarts = fieldSizes = new float[0];
         using (var bitmap = Tile == null ? SolarTile.PaintTile(readAppearance(), values, scale, 0, new float[4]) : Tile(scale))
         {
             float fit = Math.Min(1f, Math.Min((Width - 16f) / bitmap.Width, (Height - 12f) / bitmap.Height));
             if (fit <= 0) return;
             if (fit == 1f)
+            {
+                imageSize = bitmap.Size;
+                imageOrigin = new Point((Width - bitmap.Width) / 2, (Height - bitmap.Height) / 2);
                 g.DrawImageUnscaled(bitmap, (Width - bitmap.Width) / 2, (Height - bitmap.Height) / 2);
+            }
             else
             {
                 using (var fitted = Tile == null ? SolarTile.PaintTile(readAppearance(), values, scale * fit, 0, new float[4]) : Tile(scale * fit))
+                {
+                    imageSize = fitted.Size;
+                    imageOrigin = new Point((Width - fitted.Width) / 2, (Height - fitted.Height) / 2);
                     g.DrawImageUnscaled(fitted, (Width - fitted.Width) / 2, (Height - fitted.Height) / 2);
+                }
             }
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var line = new Pen(Color.FromArgb(140, 62, 122, 160), 1))
+            using (var grip = new Pen(Color.FromArgb(225, 62, 122, 160), 2))
+                for (int i = 0; i < fieldStarts.Length; ++i)
+                {
+                    float x = imageOrigin.X + fieldStarts[i] + fieldSizes[i];
+                    g.DrawLine(line, x, imageOrigin.Y + 3, x, imageOrigin.Y + imageSize.Height - 3);
+                    float center = imageOrigin.Y + imageSize.Height / 2f;
+                    g.DrawLine(grip, x, center - 5, x, center + 5);
+                }
         }
     }
 }
@@ -1764,7 +2011,7 @@ static class LayeredTile
     static extern bool UpdateLayeredWindow(IntPtr window, IntPtr destination, IntPtr position,
         ref Size size, IntPtr source, ref Point offset, int colorKey, ref Blend blend, int flags);
 
-    internal static void Present(IntPtr window, Bitmap bitmap)
+    internal static void Present(IntPtr window, Bitmap bitmap, byte opacity = 255)
     {
         var dc = CreateCompatibleDC(IntPtr.Zero);
         try
@@ -1777,7 +2024,7 @@ static class LayeredTile
                 {
                     var size = bitmap.Size;
                     var offset = Point.Empty;
-                    var blend = new Blend { Alpha = 255, Format = 1 };
+                    var blend = new Blend { Alpha = (byte)(WidgetAttention.Alpha(window) * opacity / 255), Format = 1 };
                     if (!UpdateLayeredWindow(window, IntPtr.Zero, IntPtr.Zero, ref size, dc,
                         ref offset, 0, ref blend, 2))
                         throw new System.ComponentModel.Win32Exception();
