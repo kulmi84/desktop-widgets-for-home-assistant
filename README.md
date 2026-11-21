@@ -6,7 +6,7 @@
 
 Unabhängige Windows-App für Home Assistant. Die Widgets liegen frei positionierbar auf dem Desktop. Das Programm-Icon im Infobereich öffnet per Rechtsklick das Menü **Widget hinzufügen**.
 
-**Aktuell ist Version 1.0.1 · Build 2111.2.** Die App ist auf Deutsch und Englisch verfügbar. Die Sprache lässt sich in den Programmeinstellungen wählen.
+**Aktuell ist Version 1.0.1 · Build 2111.** Die App ist auf Deutsch und Englisch verfügbar. Die Sprache lässt sich in den Programmeinstellungen wählen.
 
 ## Automatisch einblenden, wenn eine Tür oder ein Garagentor offen ist
 
