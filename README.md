@@ -20,11 +20,35 @@ Sensoren lassen sich aus Home Assistant auswählen. Die Widgets bieten eine Live
 
 ## Screenshots
 
-Die Bilder zeigen die Widgets mit Beispieldaten.
+![Solar und Fenster-Tür-Sensoren](docs/screenshots/solar-und-fenster-tueren.png)
 
-![Solar, Fenster-Tür-Sensoren und Schalter](docs/screenshots/widgets-uebersicht.png)
+### Solar
 
-![Heizung, Rollläden und frei konfigurierbare Sensoren](docs/screenshots/widgets-steuerung-und-sensoren.png)
+![Solar](docs/screenshots/widget-solar.png)
+
+### Fenster-Tür-Sensoren
+
+![Fenster-Tür-Sensoren](docs/screenshots/widget-fenster-tueren.png)
+
+### Schalter
+
+![Schalter](docs/screenshots/widget-schalter.png)
+
+### Heizung
+
+![Heizung](docs/screenshots/widget-heizung.png)
+
+### Rollläden
+
+![Rollläden](docs/screenshots/widget-rolllaeden.png)
+
+### Sensor · Luftfeuchtigkeit
+
+![Sensor · Luftfeuchtigkeit](docs/screenshots/widget-luftfeuchtigkeit.png)
+
+### Sensor · Außentemperatur
+
+![Sensor · Außentemperatur](docs/screenshots/widget-temperatur.png)
 
 ## Einstellungen sichern
 
