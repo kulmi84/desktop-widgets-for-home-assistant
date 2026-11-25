@@ -8,6 +8,22 @@ Unabhängige Windows-App für Home Assistant. Die Widgets liegen frei positionie
 
 **Aktuell ist Version 1.0.1 · Build 2111.2.** Die App ist auf Deutsch und Englisch verfügbar. Die Sprache lässt sich in den Programmeinstellungen wählen.
 
+## Automatisch einblenden, wenn eine Tür oder ein Garagentor offen ist
+
+Das Fenster-Tür-Widget muss nicht dauerhaft Platz auf dem Desktop belegen: Sobald mindestens ein ausgewählter Kontakt offen ist, erscheint es automatisch. Sind alle Kontakte wieder geschlossen, verschwindet es wieder. Das funktioniert beispielsweise mit einem Garagentor, einer Kellertür oder einem Fensterkontakt.
+
+![Beispiel: Garagentor geschlossen – Widget ausgeblendet; Garagentor offen – Widget erscheint](docs/screenshots/automatisch-einblenden-beispiel.png)
+
+*Beispieldarstellung mit simuliertem Sensorzustand und der tatsächlichen Widget-Darstellung der App.*
+
+1. Ein **Fenster-Tür-Sensoren**-Widget hinzufügen und den gewünschten Kontakt aus Home Assistant auswählen, zum Beispiel **Garagentor**.
+2. In den Widget-Einstellungen **Nur anzeigen, wenn mindestens ein Kontakt offen ist** aktivieren.
+3. Optional **Nur offene Kontakte anzeigen** aktivieren: Dann bleibt beispielsweise eine geschlossene Kellertür verborgen, während das offene Garagentor angezeigt wird.
+4. Optional unter **Beim Einblenden im Vordergrund** eine Dauer festlegen, damit der Hinweis beim Öffnen kurz über anderen Fenstern erscheint. Vordergrund- und Blinkfunktionen sind standardmäßig ausgeschaltet.
+
+English: The window and door widget can appear automatically when a selected garage door, door or window opens, and hide again when all contacts are closed. Enable **Show only when at least one contact is open**. Enable **Show only open contacts** to hide the closed contacts within the widget as well.
+
+## Weitere Funktionen
 - **Einzelne Feldbreiten:** In der Live-Vorschau lassen sich die blauen Trennlinien ziehen, um Felder unabhängig voneinander breiter oder schmaler zu machen. Schrift und Symbole behalten ihre Größe. Die Feldbreiten werden pro Widget gespeichert.
 - **Ruhige Messwertanzeige:** Eine feste Breite verhindert Größenänderungen bei wechselnden Werten.
 - **Nur offene Kontakte:** Geschlossene Kontakte können im Fenster-Tür-Widget ausgeblendet werden. Ausgeblendete Widgets lassen sich beim Konfigurieren vorübergehend sichtbar machen.
