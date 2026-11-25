@@ -2,6 +2,8 @@
 
 ![Desktop Widgets for Home Assistant auf dem Windows-Desktop](docs/screenshots/desktop-uebersicht.png)
 
+![Desktop Widgets mit geöffneter Lampensteuerung](docs/screenshots/desktop-lampensteuerung.png)
+
 Unabhängige Windows-App für Home Assistant. Die Widgets liegen frei positionierbar auf dem Desktop. Das Programm-Icon im Infobereich öffnet per Rechtsklick das Menü **Widget hinzufügen**.
 
 - **Solar** zeigt PV-Leistung, Akkustand, Hausverbrauch und Netzleistung.
