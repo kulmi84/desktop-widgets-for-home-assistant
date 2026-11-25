@@ -127,6 +127,7 @@ sealed class HeatingWidget : Form
             catch (Exception) { SetStatus(UiText.Get("Gespeicherte Einstellungen konnten nicht gelesen werden.", "Could not read the saved settings.")); return; }
             UpdateDevices(entities.Where(cover ? (Func<string, bool>)IsCover : IsClimate).ToArray());
             RestorePosition();
+            new WidgetAttention(this, () => style, Render);
             if (entities.Length == 0) await SelectDevices();
             else await RefreshDevice();
         };
@@ -174,13 +175,23 @@ sealed class HeatingWidget : Form
         using (var bold = new Font(font, FontStyle.Bold))
         {
             int row = Math.Max(icon, font.Height + (int)Math.Round(5 * scale));
-            int actualWidth = cover ? 0 : actual.Concat(new[] { "20,5°" })
+            int actualWidth = cover ? 0 : (style.FixedValueWidth ? new[] { "-99,9°" } : actual.Concat(new[] { "20,5°" }))
                 .Max(value => TextRenderer.MeasureText(value, font).Width);
-            int targetWidth = target.Concat(new[] { cover ? "100 %" : "20,5°" })
+            int targetWidth = (style.FixedValueWidth ? new[] { cover ? "100 %" : "-99,9°" } : target.Concat(new[] { cover ? "100 %" : "20,5°" }))
                 .Max(value => TextRenderer.MeasureText(value, bold, Size.Empty, TextFormatFlags.NoPadding).Width)
                 + Math.Max(2, (int)Math.Round(2 * scale));
             int button = Math.Max(1, (int)Math.Round((cover ? 24 : 13) * scale));
             int name = captions.Max(value => TextRenderer.MeasureText(value, font).Width);
+            if (style.FieldWidths != null)
+            {
+                if (!cover && style.FieldWidths.Length > 0) actualWidth = Math.Max((int)(12 * scale), (int)(style.FieldWidths[0] * scale));
+                if (style.FieldWidths.Length > 1) name = Math.Max((int)(12 * scale), (int)(style.FieldWidths[1] * scale));
+                if (style.FieldWidths.Length > 2) targetWidth = Math.Max((int)(12 * scale), (int)(style.FieldWidths[2] * scale));
+            }
+            if (style.ReportFields != null)
+                style.ReportFields(new float[] { inset + icon + 4, inset + icon + 4 + actualWidth,
+                    inset + icon + 4 + actualWidth + name + button },
+                    new float[] { actualWidth, name, targetWidth }, scale);
             int width = 2 * inset + icon + actualWidth + targetWidth + name + button * 2 + 8;
             int height = 2 * inset + row * captions.Length + gap * (captions.Length - 1);
             var image = new Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
@@ -264,7 +275,8 @@ sealed class HeatingWidget : Form
         Size threshold = SystemInformation.DragSize;
         if (Location == windowOrigin && Math.Abs(pointer.X - dragOrigin.X) < Math.Max(1, threshold.Width / 2) &&
             Math.Abs(pointer.Y - dragOrigin.Y) < Math.Max(1, threshold.Height / 2)) return;
-        Location = new Point(windowOrigin.X + pointer.X - dragOrigin.X, windowOrigin.Y + pointer.Y - dragOrigin.Y);
+        var requested = new Point(windowOrigin.X + pointer.X - dragOrigin.X, windowOrigin.Y + pointer.Y - dragOrigin.Y);
+        Location = placement == null ? requested : placement.DragLocation(requested);
     }
 
     protected override void WndProc(ref Message message)

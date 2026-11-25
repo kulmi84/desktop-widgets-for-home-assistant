@@ -28,6 +28,7 @@ sealed class WidgetPlacement
     readonly Func<HorizontalAnchor> horizontalAnchor;
     string layout;
     internal bool Locked { get; private set; }
+    bool centered;
 
     static WidgetPlacement()
     {
@@ -68,6 +69,7 @@ sealed class WidgetPlacement
         public int Y { get; set; }
         public int Width { get; set; }
         public bool Locked { get; set; }
+        public bool Centered { get; set; }
     }
 
     static Screen[] GetScreens()
@@ -92,6 +94,7 @@ sealed class WidgetPlacement
     {
         layout = current;
         Point point = fallback;
+        centered = false;
         var monitor = Screen.FromPoint(point);
         try
         {
@@ -102,6 +105,7 @@ sealed class WidgetPlacement
                 position.Monitor >= 0 && position.Monitor < screens.Length)
             {
                 monitor = screens[position.Monitor];
+                centered = position.Centered;
                 point = monitor.WorkingArea.Location + new Size(position.X, position.Y);
                 if (position.Width > 0)
                     point.X = LeftAfterResize(point.X, position.Width, widget.Width, horizontalAnchor());
@@ -109,6 +113,7 @@ sealed class WidgetPlacement
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
+        if (centered) point.X = CenteredLeft(monitor.WorkingArea, widget.Width);
         widget.Location = KeepOnScreen(point, widget.Size, monitor.WorkingArea);
     }
 
@@ -133,8 +138,20 @@ sealed class WidgetPlacement
         if (widget.ClientSize == clientSize) return;
         int width = widget.Width + clientSize.Width - widget.ClientSize.Width;
         int height = widget.Height + clientSize.Height - widget.ClientSize.Height;
-        int left = LeftAfterResize(widget.Left, widget.Width, width, horizontalAnchor());
+        int left = centered ? CenteredLeft(Screen.FromRectangle(widget.Bounds).WorkingArea, width) :
+            LeftAfterResize(widget.Left, widget.Width, width, horizontalAnchor());
         widget.SetBounds(left, widget.Top, width, height);
+    }
+
+    internal static int CenteredLeft(Rectangle area, int width)
+    {
+        return area.Left + Math.Max(0, (area.Width - width) / 2);
+    }
+
+    internal Point DragLocation(Point requested)
+    {
+        return centered ? new Point(CenteredLeft(Screen.FromRectangle(widget.Bounds).WorkingArea, widget.Width),
+            requested.Y) : requested;
     }
 
     internal void Save()
@@ -147,7 +164,7 @@ sealed class WidgetPlacement
         var data = Read();
         var origin = monitor.WorkingArea.Location;
         data[Key(current)] = new Position { Monitor = index, X = widget.Left - origin.X, Y = widget.Top - origin.Y,
-            Width = widget.Width };
+            Width = widget.Width, Centered = centered };
         Write(data);
         layout = current;
     }
@@ -165,11 +182,16 @@ sealed class WidgetPlacement
     {
         var item = new ToolStripMenuItem(UiText.Get("Widget fixieren", "Lock widget position")) { CheckOnClick = true };
         menu.Items.Add(item);
+        var center = new ToolStripMenuItem(UiText.Get("Horizontal auf dem Bildschirm zentrieren",
+            "Center horizontally on screen")) { CheckOnClick = true };
+        menu.Items.Add(center);
         menu.Opening += delegate
         {
             var placement = getPlacement();
             item.Enabled = placement != null;
             item.Checked = placement != null && placement.Locked;
+            center.Enabled = placement != null;
+            center.Checked = placement != null && placement.centered;
         };
         item.Click += delegate
         {
@@ -179,6 +201,30 @@ sealed class WidgetPlacement
             catch (IOException) { ShowLockError(widget); }
             catch (UnauthorizedAccessException) { ShowLockError(widget); }
             item.Checked = placement.Locked;
+        };
+        center.Click += delegate
+        {
+            var placement = getPlacement();
+            if (placement == null) return;
+            bool previous = placement.centered;
+            Point previousLocation = widget.Location;
+            Action restoreCentering = delegate
+            {
+                placement.centered = previous;
+                widget.Location = previousLocation;
+                MessageBox.Show(widget, UiText.Get("Die Ausrichtung konnte nicht gespeichert werden.",
+                    "Could not save the alignment."), ReleaseVersion.ProductName);
+            };
+            try
+            {
+                placement.centered = center.Checked;
+                if (placement.centered)
+                    widget.Left = CenteredLeft(Screen.FromRectangle(widget.Bounds).WorkingArea, widget.Width);
+                placement.Save();
+            }
+            catch (IOException) { restoreCentering(); }
+            catch (UnauthorizedAccessException) { restoreCentering(); }
+            center.Checked = placement.centered;
         };
     }
 
