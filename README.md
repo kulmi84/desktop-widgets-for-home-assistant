@@ -75,6 +75,8 @@ In den Einstellungen die eigene Home-Assistant-Adresse und einen langlebigen Zug
 Die Material Design Icons von Pictogrammers unterliegen [Apache 2.0](MDI-LICENSE.txt). Die verwendeten Symbole sind in [MDI-NOTICE.txt](MDI-NOTICE.txt) aufgeführt.
 ## Microsoft Store
 
+[Desktop Widgets for Home Assistant im Microsoft Store herunterladen](https://apps.microsoft.com/detail/9nz0l6dnzmmk?hl=de-DE&gl=DE)
+
 Die Store-Ausgabe richtet beim ersten Start eine eigene Home-Assistant-Verbindung mit leeren Feldern ein. Nach dem Verbinden lassen sich Widgets über das Programm-Icon im Infobereich hinzufügen. Die Store-Ausgabe verwendet ein eigenes lokales Profil. Hinweise zur Datenspeicherung stehen in der [Datenschutzerklärung](docs/datenschutz.md).
 
 Zum Paketieren mit dem Windows SDK die Paketidentität und die Herausgeberdaten aus Partner Center verwenden:
