@@ -37,7 +37,16 @@ sealed class Appearance
     public bool BackgroundOnAnyClick { get; set; }
     public bool FixedValueWidth { get; set; }
     public int[] FieldWidths { get; set; }
+    public SolarFieldRule[] SolarRules { get; set; }
     internal Action<float[], float[], float> ReportFields;
+
+    internal Appearance Copy()
+    {
+        var copy = (Appearance)MemberwiseClone();
+        copy.FieldWidths = FieldWidths == null ? null : (int[])FieldWidths.Clone();
+        copy.SolarRules = SolarRules == null ? null : SolarFieldRule.Copy(SolarRules);
+        return copy;
+    }
 
     public Appearance()
     {
@@ -132,9 +141,10 @@ sealed class Options : Form
     internal Settings Result { get; private set; }
 
     internal Appearance SelectedAppearance { get; private set; }
+    SolarFieldRule[] solarRules;
 
     internal Options(Settings previous, string[] values, Appearance doorStyle = null, Appearance solarStyle = null,
-        DoorWidget.DoorEditor doorEditor = null, bool connectionOnly = false)
+        DoorWidget.DoorEditor doorEditor = null, bool connectionOnly = false, double?[] readings = null)
     {
         this.previous = previous;
         Icon = WidgetIcon.Load();
@@ -264,6 +274,31 @@ sealed class Options : Form
         {
             save.Click += Save;
             AddCopyMenu(design, new Point(14, 553), "Solar", null, ApplyStyle);
+            solarRules = appearance.SolarRules == null ? null : SolarFieldRule.Copy(appearance.SolarRules);
+            var rulesButton = new SettingsButton { Text = UiText.Get("Felder ausblenden…", "Hide fields…"), AutoSize = true,
+                Location = new Point(12, 296) };
+            StyleButton(rulesButton);
+            var rulesState = new Label { AutoSize = true, ForeColor = Color.Silver, Location = new Point(160, 303) };
+            Action showRules = delegate
+            {
+                int active = solarRules == null ? 0 : solarRules.Count(rule => rule.Enabled);
+                rulesState.Text = active == 0 ? UiText.Get("Alle Felder immer sichtbar", "All fields always visible")
+                    : active == 1 ? UiText.Get("1 Feld wird bei Bedarf ausgeblendet", "1 field hidden when its condition is met")
+                    : string.Format(UiText.Get("{0} Felder werden bei Bedarf ausgeblendet", "{0} fields hidden when their conditions are met"), active);
+            };
+            showRules();
+            rulesButton.Click += delegate
+            {
+                using (var dialog = new SolarRulesDialog(ReadAppearance(), solarRules, readings))
+                {
+                    if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                    solarRules = dialog.Result.Any(rule => rule.Enabled) ? dialog.Result : null;
+                    showRules();
+                }
+            };
+            connection.Controls.Add(rulesButton);
+            connection.Controls.Add(rulesState);
+            connection.Height += 30;
         }
         Controls.AddRange(new Control[] { save, cancel });
         var previewGroup = new SettingsCard { Text = UiText.Get("Live-Vorschau", "Live preview"), ForeColor = ForeColor,
@@ -719,6 +754,7 @@ sealed class Options : Form
             FixedValueWidth = fixedValueWidth.Checked,
             FieldWidths = fieldWidths == null ? null : (int[])fieldWidths.Clone(),
             ReportFields = reportFields,
+            SolarRules = solarRules == null ? null : SolarFieldRule.Copy(solarRules),
             ShowForegroundSeconds = previous != null && previous.Appearance != null ? previous.Appearance.ShowForegroundSeconds : 0
         };
     }
@@ -787,7 +823,7 @@ sealed class Options : Form
 
         internal SensorPicker(SolarTile.Sensor[] sensors, string unit, string current)
         {
-            Text = UiText.Get("Sensor auswählen", "Select sensor");
+            Text = unit == "board" ? UiText.Get("Entität auswählen", "Select entity") : UiText.Get("Sensor auswählen", "Select sensor");
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = MinimizeBox = false;
@@ -798,9 +834,11 @@ sealed class Options : Form
             ForeColor = Color.WhiteSmoke;
             int dark = 1;
             DwmSetWindowAttribute(Handle, 20, ref dark, sizeof(int));
+            if (unit == "board") SettingsTheme.UseRoundedWindowCorners(Handle);
 
             var matches = (sensors ?? new SolarTile.Sensor[0]).Where(sensor => sensor != null &&
-                sensor.entity_id != null && sensor.attributes != null && (unit == "any_sensor" ? DoorWidget.IsSensor(sensor.entity_id) : unit == "window_cover"
+                sensor.entity_id != null && sensor.attributes != null && (unit == "board" ? BoardSelection.IsSupported(sensor.entity_id)
+                    : unit == "any_sensor" ? DoorWidget.IsSensor(sensor.entity_id) : unit == "window_cover"
                     ? HeatingWidget.IsCover(sensor.entity_id) && !new[] { "garage", "door", "gate" }.Contains(sensor.attributes.device_class)
                     : unit == "climate" ? HeatingWidget.IsClimate(sensor.entity_id) : unit == "switch" ? DoorWidget.IsSwitchEntity(sensor.entity_id) : unit == null
                     ? (sensor.entity_id.StartsWith("binary_sensor.", StringComparison.Ordinal) &&
@@ -816,6 +854,7 @@ sealed class Options : Form
                 ForeColor = ForeColor, AccessibleName = UiText.Get("Sensoren suchen", "Search sensors") };
             list = new ListBox { Bounds = new Rectangle(12, 70, 636, 288), BackColor = Input,
                 ForeColor = ForeColor, DisplayMember = "Display", HorizontalScrollbar = true };
+            if (unit == "board") search.AccessibleName = UiText.Get("Entitäten suchen", "Search entities");
             var accept = new SettingsButton { Primary = true, Text = UiText.Get("Übernehmen", "Apply"), Bounds = new Rectangle(538, 369, 110, 28) };
             var cancel = new SettingsButton { Text = UiText.Get("Abbrechen", "Cancel"), Bounds = new Rectangle(420, 369, 110, 28), DialogResult = DialogResult.Cancel };
             StyleButton(accept);
@@ -833,7 +872,11 @@ sealed class Options : Form
                     if (((SolarTile.Sensor)list.Items[i]).entity_id == current) { list.SelectedIndex = i; break; }
                 accept.Enabled = list.SelectedIndex >= 0;
                 list.EndUpdate();
-                label.Text = list.Items.Count == 0 ? UiText.Get("Keine passenden Sensoren gefunden.", "No matching sensors found.") : list.Items.Count + UiText.Get(" passende Sensoren", " matching sensors");
+                label.Text = unit == "board"
+                    ? (list.Items.Count == 0 ? UiText.Get("Keine passenden Entitäten gefunden.", "No matching entities found.")
+                        : list.Items.Count + UiText.Get(" passende Entitäten", " matching entities"))
+                    : (list.Items.Count == 0 ? UiText.Get("Keine passenden Sensoren gefunden.", "No matching sensors found.")
+                        : list.Items.Count + UiText.Get(" passende Sensoren", " matching sensors"));
             };
             search.TextChanged += delegate { filter(); };
             Controls.AddRange(new Control[] { label, search, list, cancel, accept });
@@ -882,6 +925,8 @@ sealed class SolarTile : Form
     static readonly string[] Captions = { "Solar", UiText.Get("Akku", "Battery"), UiText.Get("Haus", "Home"), UiText.Get("Netz", "Grid") };
     readonly string[] values = { "—", "—", "—", "—" };
     readonly string[] metricHints = new string[4];
+    readonly double?[] readings = new double?[4];
+    int[] visibleFields = { 0, 1, 2, 3 };
     Appearance appearance = new Appearance();
     int hovered = -1;
     readonly float[] metricStarts = new float[4];
@@ -930,11 +975,16 @@ sealed class SolarTile : Form
         if (demo)
         {
             double[] examples = { 7720, 100, 520, -7200 };
-            for (int i = 0; i < values.Length; i++) values[i] = DisplayReading(i, examples[i]);
+            for (int i = 0; i < values.Length; i++)
+            {
+                values[i] = DisplayReading(i, examples[i]);
+                readings[i] = examples[i];
+            }
         }
         if (!demo)
         {
             menu.Items.Add(UiText.Get("Einstellungen", "Settings"), null, delegate { Configure(); });
+            menu.Items.Add(UiText.Get("Felder ausblenden…", "Hide fields…"), null, delegate { EditSolarRules(); });
             menu.Items.Add(UiText.Get("Aktualisieren", "Refresh"), null, async delegate { await RefreshValues(); });
             WidgetPlacement.AddLockMenuItem(menu, this, () => placement);
             try { settings = Settings.Load(); }
@@ -1138,6 +1188,27 @@ sealed class SolarTile : Form
         Activate();
         if (reopening) RefreshVisibleSolar();
         RememberWidgets();
+        // A tile whose fields are all hidden by rules is invisible; reopening it offers the rules.
+        if (reopening && visibleFields.Length == 0) EditSolarRules();
+    }
+
+    void EditSolarRules()
+    {
+        if (settings == null) return;
+        var style = settings.Appearance ?? new Appearance();
+        using (var dialog = new SolarRulesDialog(style, style.SolarRules, readings))
+        {
+            if ((Visible ? dialog.ShowDialog(this) : dialog.ShowDialog()) != DialogResult.OK) return;
+            style.SolarRules = dialog.Result.Any(rule => rule.Enabled) ? dialog.Result : null;
+            settings.Appearance = style;
+            try { settings.Save(); }
+            catch (Exception exception)
+            {
+                MessageBox.Show(this, UiText.Get("Einstellungen konnten nicht gespeichert werden: ", "Could not save settings: ") + exception.Message,
+                    ReleaseVersion.SolarName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            ApplyAppearance();
+        }
     }
 
     async void RefreshVisibleSolar() { await RefreshValues(); }
@@ -1230,8 +1301,10 @@ sealed class SolarTile : Form
     protected override void OnMouseMove(MouseEventArgs args)
     {
         base.OnMouseMove(args);
-        int metric = 0;
-        while (metric + 1 < metricStarts.Length && args.X >= metricStarts[metric + 1]) metric++;
+        if (visibleFields.Length == 0) return;
+        int slot = 0;
+        while (slot + 1 < visibleFields.Length && args.X >= metricStarts[slot + 1]) slot++;
+        int metric = visibleFields[slot];
         if (metric == hovered) return;
         hovered = metric;
         hints.SetToolTip(this, metricHints[metric]);
@@ -1249,14 +1322,29 @@ sealed class SolarTile : Form
         if (!IsHandleCreated || IsDisposed) return;
         float scale = LayeredTile.ScaleFor(this);
         // One alpha level keeps the transparent desktop tile reachable by the mouse.
-        using (var bitmap = PaintTile(appearance, values, scale, 1, metricStarts))
+        int[] fields;
+        using (var bitmap = SolarVisibility.Paint(appearance, values, readings, scale, 1, metricStarts, out fields))
         {
-            if (placement != null) placement.Resize(bitmap.Size);
-            else if (ClientSize != bitmap.Size) ClientSize = bitmap.Size;
-            LayeredTile.Present(Handle, bitmap);
+            visibleFields = fields;
+            if (bitmap == null)
+            {
+                // Every field is hidden by its rule: keep size and position, but present a fully
+                // transparent surface so the tile neither shows nor catches the mouse.
+                hints.SetToolTip(this, null);
+                hovered = -1;
+                using (var empty = new Bitmap(Math.Max(1, ClientSize.Width), Math.Max(1, ClientSize.Height),
+                    System.Drawing.Imaging.PixelFormat.Format32bppPArgb))
+                    LayeredTile.Present(Handle, empty);
+            }
+            else
+            {
+                if (placement != null) placement.Resize(bitmap.Size);
+                else if (ClientSize != bitmap.Size) ClientSize = bitmap.Size;
+                LayeredTile.Present(Handle, bitmap);
+            }
         }
-        AccessibleName = Text = ReleaseVersion.SolarName + ": " + string.Join(", ", Captions[0] + " " + values[0], Captions[1] + " " + values[1],
-            Captions[2] + " " + values[2], Captions[3] + " " + values[3]);
+        AccessibleName = Text = ReleaseVersion.SolarName + ": " + string.Join(", ",
+            visibleFields.Select(i => Captions[i] + " " + values[i]));
     }
 
     internal static Font CreateTileFont(string typeface, float size, FontStyle style)
@@ -1458,7 +1546,7 @@ sealed class SolarTile : Form
 
     bool Configure(bool connectionOnly = false)
     {
-        using (var dialog = new Options(settings, values, connectionOnly: connectionOnly))
+        using (var dialog = new Options(settings, values, connectionOnly: connectionOnly, readings: readings))
         {
             if ((Visible ? dialog.ShowDialog(this) : dialog.ShowDialog()) != DialogResult.OK) return false;
             settings = dialog.Result;
@@ -1478,6 +1566,7 @@ sealed class SolarTile : Form
         for (int i = 0; i < values.Length; i++)
         {
             values[i] = "—";
+            readings[i] = null;
             metricHints[i] = hint;
         }
         RenderTile();
@@ -1496,14 +1585,15 @@ sealed class SolarTile : Form
             string token;
             try { token = current.ReadToken(); }
             catch (Exception) { ShowEmpty(UiText.Get("Zugriffstoken kann nicht gelesen werden. Bitte neu eingeben.", "Could not read the access token. Enter it again.")); return; }
-            var requests = new Task<Tuple<string, string>>[4];
+            var requests = new Task<Tuple<string, string, double?>>[4];
             for (int i = 0; i < requests.Length; i++) requests[i] = ReadMetric(current, i, token);
-            var readings = await Task.WhenAll(requests);
+            var results = await Task.WhenAll(requests);
             if (IsDisposed || current != settings) return;
-            for (int i = 0; i < readings.Length; i++)
+            for (int i = 0; i < results.Length; i++)
             {
-                values[i] = readings[i].Item1;
-                metricHints[i] = readings[i].Item2;
+                values[i] = results[i].Item1;
+                metricHints[i] = results[i].Item2;
+                readings[i] = results[i].Item3;
             }
             RenderTile();
         }
@@ -1518,7 +1608,7 @@ sealed class SolarTile : Form
         }
     }
 
-    async Task<Tuple<string, string>> ReadMetric(Settings current, int index, string token)
+    async Task<Tuple<string, string, double?>> ReadMetric(Settings current, int index, string token)
     {
         string entity = current.Entities[index];
         var primary = Read(current, entity, index, token);
@@ -1526,11 +1616,11 @@ sealed class SolarTile : Form
             ? Read(current, current.GridExportEntity, index, token) : null;
         var reading = await primary;
         var export = exported == null ? null : await exported;
-        if (!reading.Item1.HasValue) return Tuple.Create("—", reading.Item2);
-        if (export != null && !export.Item1.HasValue) return Tuple.Create("—", export.Item2);
+        if (!reading.Item1.HasValue) return Tuple.Create("—", reading.Item2, (double?)null);
+        if (export != null && !export.Item1.HasValue) return Tuple.Create("—", export.Item2, (double?)null);
         double net = NetReading(reading.Item1.Value, export == null ? 0 : export.Item1.Value);
         string hint = export == null ? entity : entity + " − " + current.GridExportEntity;
-        return Tuple.Create(DisplayReading(index, net), hint + " · " + DateTime.Now.ToString("HH:mm:ss"));
+        return Tuple.Create(DisplayReading(index, net), hint + " · " + DateTime.Now.ToString("HH:mm:ss"), (double?)net);
     }
 
     internal static double NetReading(double imported, double exported)
@@ -1562,7 +1652,7 @@ sealed class SolarTile : Form
         catch (Exception) { return Tuple.Create<double?, string>(null, UiText.Get("Messwert konnte nicht geladen werden: ", "Could not load sensor reading: ") + entity); }
     }
 
-    static string DisplayReading(int index, double number)
+    internal static string DisplayReading(int index, double number)
     {
         var culture = CultureInfo.GetCultureInfo(UiText.Get("de-DE", "en-US"));
         if (index == 1) return number.ToString("N0", culture) + " %";
@@ -1681,7 +1771,23 @@ sealed class SolarTile : Form
                 }
                 var restoredFields = new JavaScriptSerializer().Deserialize<Appearance>(new JavaScriptSerializer().Serialize(customFields));
                 if (!restoredFields.FieldWidths.SequenceEqual(customFields.FieldWidths)) return 1;
-                var door = new Door { Open = "Auf", Closed = "Zu" };
+                var hideRules = new Appearance { FieldWidths = new[] { 80, 60, 90, 70 }, SolarRules = new[] {
+                    new SolarFieldRule { Enabled = true, Comparison = 1, First = 0 }, new SolarFieldRule(),
+                    new SolarFieldRule { Enabled = true, Comparison = 6, First = 0, Second = 100 }, new SolarFieldRule() } };
+                var restoredRules = new JavaScriptSerializer().Deserialize<Appearance>(new JavaScriptSerializer().Serialize(hideRules));
+                if (restoredRules.SolarRules == null || !restoredRules.SolarRules[2].Enabled || restoredRules.SolarRules[2].Second != 100) return 1;
+                int[] shown;
+                using (var partial = SolarVisibility.Paint(hideRules, tile.values, new double?[] { 0, 50, 520, null }, 1, 0, new float[4], out shown))
+                    if (partial == null || !shown.SequenceEqual(new[] { 1, 2, 3 })) return 1;
+                using (var full = PaintTile(hideRules, tile.values, 1, 0, new float[4]))
+                using (var hidden = SolarVisibility.Paint(hideRules, tile.values, new double?[] { -5, 50, 40, 0 }, 1, 0, new float[4], out shown))
+                    if (hidden == null || !shown.SequenceEqual(new[] { 1, 3 }) || hidden.Width >= full.Width) return 1;
+                hideRules.SolarRules[1] = new SolarFieldRule { Enabled = true, Comparison = 3, First = 0 };
+                hideRules.SolarRules[3] = new SolarFieldRule { Enabled = true, Comparison = 7, First = 10, Second = 20 };
+                using (var none = SolarVisibility.Paint(hideRules, tile.values, new double?[] { 0, 50, 40, 0 }, 1, 0, new float[4], out shown))
+                    if (none != null || shown.Length != 0) return 1;
+                if (hideRules.Copy().SolarRules == hideRules.SolarRules) return 1;
+                var door =new Door { Open = "Auf", Closed = "Zu" };
                 if (door.Describe("on") != "Auf" || door.Describe("closed") != "Zu" ||
                     door.Describe("unavailable") != UiText.Get("Nicht verfügbar", "Unavailable")) return 1;
                 using (var doorWidget = new DoorWidget(() => null, false)) { }

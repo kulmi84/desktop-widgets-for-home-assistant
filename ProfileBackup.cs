@@ -11,6 +11,7 @@ static class ProfileBackup
     static readonly string Folder = Path.Combine(Environment.GetFolderPath(
         Environment.SpecialFolder.LocalApplicationData), ReleaseVersion.DataFolder);
     static readonly string[] WidgetFiles = { "doors.json", "switches.json", "heating.json", "covers.json",
+        BoardSelection.FileName,
         "heating-position.json", "covers-position.json", "widgets.txt", "position.txt", WidgetPlacement.FileName };
 
     public sealed class Backup
@@ -138,7 +139,7 @@ static class ProfileBackup
             DoorWidget.IsSensorId(name.Substring(prefix.Length, name.Length - prefix.Length - 5)));
     }
 
-    static void Write(string path, string contents)
+    internal static void Write(string path, string contents)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path));
         string temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";

@@ -3,3 +3,5 @@
 *.json.bak
 /artifacts/
 /Sicherungen/
+/Store/WidgetBoard/bin/
+/Store/WidgetBoard/obj/

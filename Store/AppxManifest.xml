@@ -3,8 +3,10 @@
          xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
          xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
          xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
-         IgnorableNamespaces="uap uap5 rescap">
-  <Identity Name="DesktopWidgets.LocalPreview" Publisher="CN=Desktop Widgets Local Preview" Version="1.0.0.0" ProcessorArchitecture="neutral" />
+         xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+         xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
+         IgnorableNamespaces="uap uap3 uap5 com rescap">
+  <Identity Name="DesktopWidgets.LocalPreview" Publisher="CN=Desktop Widgets Local Preview" Version="1.0.0.0" ProcessorArchitecture="x64" />
   <Properties>
     <DisplayName>Desktop Widgets for Home Assistant</DisplayName>
     <PublisherDisplayName>Desktop Widgets</PublisherDisplayName>
@@ -20,12 +22,76 @@
         Description="Unabhängige Desktop-Widgets für Home Assistant"
         Square44x44Logo="Assets\Logo44.png" Square150x150Logo="Assets\Logo150.png" BackgroundColor="transparent" />
       <Extensions>
+        <com:Extension Category="windows.comServer">
+          <com:ComServer>
+            <com:ExeServer Executable="WidgetBoard\WidgetBoard.exe" DisplayName="Home Assistant Widget">
+              <com:Class Id="f110e6ce-7bd0-475b-9616-8fcb5a85dfcd" DisplayName="Home Assistant Widget" />
+            </com:ExeServer>
+          </com:ComServer>
+        </com:Extension>
+        <uap3:Extension Category="windows.appExtension">
+          <uap3:AppExtension Name="com.microsoft.windows.widgets" DisplayName="Home Assistant"
+                             Id="HomeAssistantWidgetBoard" PublicFolder="Assets">
+            <uap3:Properties>
+              <WidgetProvider>
+                <ProviderIcons><Icon Path="Assets\Logo50.png" /></ProviderIcons>
+                <Activation><CreateInstance ClassId="f110e6ce-7bd0-475b-9616-8fcb5a85dfcd" /></Activation>
+                <Definitions>
+                  <Definition Id="HomeAssistant" DisplayName="Home Assistant"
+                              Description="Home Assistant sensors and switches" AllowMultiple="true" IsCustomizable="true">
+                    <Capabilities>
+                      <Capability><Size Name="small" /></Capability>
+                      <Capability><Size Name="medium" /></Capability>
+                      <Capability><Size Name="large" /></Capability>
+                    </Capabilities>
+                    <ThemeResources>
+                      <Icons><Icon Path="Assets\Logo44.png" /></Icons>
+                      <Screenshots>
+                        <Screenshot Path="Assets\WidgetBoardPreview.png" DisplayAltText="Temperature, humidity and a lamp switch" />
+                      </Screenshots>
+                    </ThemeResources>
+                  </Definition>
+                  <Definition Id="SolarInstallation" DisplayName="Solaranlage"
+                              Description="PV production, home consumption and battery level" AllowMultiple="false">
+                    <Capabilities>
+                      <Capability><Size Name="small" /></Capability>
+                      <Capability><Size Name="medium" /></Capability>
+                      <Capability><Size Name="large" /></Capability>
+                    </Capabilities>
+                    <ThemeResources>
+                      <Icons><Icon Path="Assets\Logo44.png" /></Icons>
+                      <Screenshots>
+                        <Screenshot Path="Assets\SolarBoardPreview.png" DisplayAltText="PV + BKW, Hausverbrauch und Akku" />
+                      </Screenshots>
+                    </ThemeResources>
+                  </Definition>
+                </Definitions>
+              </WidgetProvider>
+            </uap3:Properties>
+          </uap3:AppExtension>
+        </uap3:Extension>
         <uap5:Extension Category="windows.startupTask" Executable="DesktopWidgetsForHomeAssistant.Store.exe" EntryPoint="Windows.FullTrustApplication">
           <uap5:StartupTask TaskId="DesktopWidgetsStartup" Enabled="false" DisplayName="Desktop Widgets for Home Assistant" />
         </uap5:Extension>
       </Extensions>
     </Application>
   </Applications>
+  <Extensions>
+    <Extension Category="windows.activatableClass.proxyStub">
+      <ProxyStub ClassId="00000355-0000-0000-C000-000000000046">
+        <Path>Microsoft.Windows.Widgets.winmd</Path>
+        <Interface Name="Microsoft.Windows.Widgets.Providers.IWidgetProvider" InterfaceId="5C5774CC-72A0-452D-B9ED-075C0DD25EED" />
+        <Interface Name="Microsoft.Windows.Widgets.Providers.IWidgetProvider2" InterfaceId="38C3A963-DD93-479D-9276-04BF84EE1816" />
+      </ProxyStub>
+    </Extension>
+    <Extension Category="windows.activatableClass.inProcessServer">
+      <InProcessServer>
+        <Path>WidgetBoard\Microsoft.Windows.Widgets.dll</Path>
+        <ActivatableClass ActivatableClassId="Microsoft.Windows.Widgets.Providers.WidgetManager" ThreadingModel="both" />
+        <ActivatableClass ActivatableClassId="Microsoft.Windows.Widgets.Providers.WidgetUpdateRequestOptions" ThreadingModel="both" />
+      </InProcessServer>
+    </Extension>
+  </Extensions>
   <Capabilities>
     <Capability Name="internetClient" />
     <rescap:Capability Name="runFullTrust" />

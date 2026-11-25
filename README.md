@@ -6,7 +6,24 @@
 
 Unabhängige Windows-App für Home Assistant. Die Widgets liegen frei positionierbar auf dem Desktop. Das Programm-Icon im Infobereich öffnet per Rechtsklick das Menü **Widget hinzufügen**.
 
-**Aktuell ist Version 1.0.1 · Build 2111.** Die App ist auf Deutsch und Englisch verfügbar. Die Sprache lässt sich in den Programmeinstellungen wählen.
+**Aktuell ist Version 1.0.1 · Build 2411.10.** Die App ist auf Deutsch und Englisch verfügbar. Die Sprache lässt sich in den Programmeinstellungen wählen.
+
+## Windows-Widgetboard
+
+Die MSIX-Ausgabe bietet unter Windows 11 ein natives **Home Assistant**-Widget für das Widgetboard. Die frei positionierbaren Desktop-Widgets sind weiterhin über das Infobereichssymbol verfügbar.
+
+1. In der App unter **Einstellungen → Verbindung einrichten…** mit Home Assistant verbinden.
+2. Unter **Einstellungen → Windows-Widgetboard…** bis zu drei Entitäten auswählen und speichern. Sensoren und Binärsensoren zeigen ihren Zustand an. Schalter, Lampen, Helfer vom Typ `input_boolean` und Ventilatoren lassen sich ein- und ausschalten.
+3. Das Windows-Widgetboard über die Taskleiste oder mit **Windows + W** öffnen und **Home Assistant** hinzufügen.
+
+Das Widget aktualisiert die Werte beim Öffnen und alle 15 Sekunden, solange es aktiv ist. Windows zeichnet die Karte in der aktuellen Anzeigeskalierung und im gewählten Windows-Design.
+
+Unter **Einstellungen → Windows-Widgetboard… → Neue Kachel** lassen sich weitere Home-Assistant-Kacheln mit eigenem Namen und eigener Entitätsauswahl speichern. Im Board für jede Kachel erneut **Home Assistant** hinzufügen. Über **… → Widget anpassen** lässt sich die Zuordnung ändern. Beide Widget-Typen bieten **Klein**, **Mittel** und **Groß**.
+In den Widgetboard-Einstellungen lässt sich pro Home-Assistant-Kachel unter **Darstellung** zwischen **Liste** und **Große Werte** wählen. Kontakte mit einer passenden Home-Assistant-Geräteklasse zeigen **Offen** oder **Geschlossen** an.
+Entitäten vom Typ `button` und `input_button` lösen auf der Kachel über **Drücken** die zugehörige Home-Assistant-Aktion aus.
+
+Als zweites Widget steht **Solaranlage** zur Auswahl. Es zeigt PV-Erzeugung, Hausverbrauch und Akkustand in der Anordnung der Echo-Show-Kachel. Die Sensoren werden in den Einstellungen der frei platzierbaren **Solar**-Kachel ausgewählt. Für **PV + BKW** dort einen Sensor für die gemeinsame Erzeugung wählen.
+Unter **Einstellungen → Windows-Widgetboard… → Solaranlage · Nachkommastellen** lässt sich jeder Messwert automatisch oder mit 0 bis 6 Nachkommastellen anzeigen.
 
 ## Automatisch einblenden, wenn eine Tür oder ein Garagentor offen ist
 
@@ -36,6 +53,7 @@ English: The window and door widget can appear automatically when a selected gar
 English: Customizable Windows desktop widgets for Home Assistant. Drag the blue dividers in the live preview to adjust individual field widths without scaling text or icons. Field widths are saved per widget. View sensor readings and control lights, heating and roller shutters. Choose a fixed edge or center for resizing, lock widget positions, and show the window and door widget only when a contact is open.
 
 - **Solar** zeigt PV-Leistung, Akkustand, Hausverbrauch und Netzleistung.
+- **Felder ausblenden** in den Solar-Einstellungen legt Grenzwerte oder Bereiche pro Feld fest. Wenn alle Felder ausgeblendet sind, öffnet **Widget hinzufügen → Solar** die Ausblendbedingungen.
 - **Fenster-Tür-Sensoren** zeigt Öffnungszustände mit passenden Symbolen für Fenster, Türen und Garagentore.
 - **Schalter** zeigt Ein-/Aus-Zustände und schaltet Geräte per Klick. Mehrere Schalter-Widgets lassen sich getrennt einrichten. Ein Klick auf einen Lampennamen öffnet den Dimmer und bei kompatiblen Lampen die Farbauswahl. Weitere Geräteaktionen sind über das Rechtsklickmenü verfügbar.
 
@@ -100,8 +118,8 @@ Die Material Design Icons von Pictogrammers unterliegen [Apache 2.0](MDI-LICENSE
 
 Die Store-Ausgabe richtet beim ersten Start eine eigene Home-Assistant-Verbindung mit leeren Feldern ein. Nach dem Verbinden lassen sich Widgets über das Programm-Icon im Infobereich hinzufügen. Die Store-Ausgabe verwendet ein eigenes lokales Profil. Hinweise zur Datenspeicherung stehen in der [Datenschutzerklärung](docs/datenschutz.md).
 
-Zum Paketieren mit dem Windows SDK die Paketidentität und die Herausgeberdaten aus Partner Center verwenden:
+Zum Paketieren werden das Windows SDK mit MakeAppx und das .NET 8 SDK benötigt. Der erste Build lädt das Windows App SDK über NuGet. Für Store-Pakete die Paketidentität und die Herausgeberdaten aus Partner Center verwenden.
 
     powershell -NoProfile -File Store\Build-Msix.ps1 -IdentityName "PAKETNAME" -Publisher "CN=HERAUSGEBER-ID" -PublisherDisplayName "HERAUSGEBERNAME"
 
-Das Paket liegt anschließend im Ordner artifacts. Die lokale Vorschauidentität dient zur Buildprüfung. Für die Veröffentlichung das Paket mit den zugewiesenen Identitätsdaten neu bauen und in Partner Center einreichen.
+Das Paket liegt anschließend im Ordner `artifacts`. Ohne `-Architecture` wird für x64 gebaut. Für ARM64 bzw. 32-Bit-Windows `-Architecture arm64` bzw. `-Architecture x86` angeben. Die MSIX-Version für ein Store-Update lässt sich über `-PackageVersion` setzen. Für eine lokale Installation wird ein vertrauenswürdig signiertes MSIX oder eine registrierte Entwicklerinstallation benötigt.
