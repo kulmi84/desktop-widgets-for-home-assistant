@@ -1,8 +1,8 @@
 # Desktop Widgets for Home Assistant
 
-![Desktop Widgets for Home Assistant auf dem Windows-Desktop](docs/screenshots/desktop-uebersicht.png)
+![Desktop Widgets for Home Assistant auf dem Windows-Desktop](docs/screenshots/desktop-uebersicht-anonymisiert.png)
 
-![Desktop Widgets mit geöffneter Lampensteuerung](docs/screenshots/desktop-lampensteuerung.png)
+![Desktop Widgets mit geöffneter Lampensteuerung](docs/screenshots/desktop-lampensteuerung-anonymisiert.png)
 
 Unabhängige Windows-App für Home Assistant. Die Widgets liegen frei positionierbar auf dem Desktop. Das Programm-Icon im Infobereich öffnet per Rechtsklick das Menü **Widget hinzufügen**.
 
@@ -32,15 +32,15 @@ Sensoren lassen sich aus Home Assistant auswählen. Die Widgets bieten eine Live
 
 ### Schalter
 
-![Schalter](docs/screenshots/widget-schalter.png)
+![Schalter](docs/screenshots/widget-schalter-anonymisiert.png)
 
 ### Heizung
 
-![Heizung](docs/screenshots/widget-heizung.png)
+![Heizung](docs/screenshots/widget-heizung-anonymisiert.png)
 
 ### Rollläden
 
-![Rollläden](docs/screenshots/widget-rolllaeden.png)
+![Rollläden](docs/screenshots/widget-rolllaeden-anonymisiert.png)
 
 ### Sensor · Luftfeuchtigkeit
 
