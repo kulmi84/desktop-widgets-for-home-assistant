@@ -6,9 +6,17 @@
 
 Unabhängige Windows-App für Home Assistant. Die Widgets liegen frei positionierbar auf dem Desktop. Das Programm-Icon im Infobereich öffnet per Rechtsklick das Menü **Widget hinzufügen**.
 
+**Aktuell ist Version 1.0.1 · Build 1511.2.** Die App ist auf Deutsch und Englisch verfügbar. Die Sprache lässt sich in den Programmeinstellungen wählen.
+
+- **Bedingte Sichtbarkeit:** Das Fenster-Tür-Widget kann automatisch erscheinen, sobald mindestens ein Kontakt offen ist.
+- **Feste Ausrichtung:** Pro Widget kann bei einer Breitenänderung die linke Kante, die Mitte oder die rechte Kante fest bleiben.
+- **Positionssperre:** Per Rechtsklick auf eine Kachel lässt sich das Verschieben sperren. Die Einstellung wird pro Widget gespeichert.
+
+English: Customizable Windows desktop widgets for Home Assistant. View sensor readings and control lights, heating and roller shutters. Choose a fixed edge or center for resizing, lock widget positions, and show the window and door widget only when a contact is open.
+
 - **Solar** zeigt PV-Leistung, Akkustand, Hausverbrauch und Netzleistung.
 - **Fenster-Tür-Sensoren** zeigt Öffnungszustände mit passenden Symbolen für Fenster, Türen und Garagentore.
-- **Schalter** zeigt Ein-/Aus-Zustände und schaltet steuerbare Entitäten per Klick. Die Anzeige kann waagerecht oder senkrecht angeordnet werden. Über den Gerätenamen im Rechtsklickmenü lassen sich dimmbare Lampen, regelbare Lüfter und Medienplayer bedienen. Szenen und Skripte sind ebenfalls auswählbar.
+- **Schalter** zeigt Ein-/Aus-Zustände und schaltet Geräte per Klick. Mehrere Schalter-Widgets lassen sich getrennt einrichten. Ein Klick auf einen Lampennamen öffnet den Dimmer und bei kompatiblen Lampen die Farbauswahl. Weitere Geräteaktionen sind über das Rechtsklickmenü verfügbar.
 
 - **Heizung** zeigt Ist- und Solltemperatur von Home-Assistant-Thermostaten und ändert die Solltemperatur auf ausdrücklichen Klick.
 
@@ -16,7 +24,7 @@ Unabhängige Windows-App für Home Assistant. Die Widgets liegen frei positionie
 
 - **Sensoren** lassen sich in mehreren frei benennbaren Kacheln kombinieren. Pro Sensor können Name, Icon, Einheit und Dezimalstellen eingestellt werden. Die Werte lassen sich unter oder neben der Bezeichnung anzeigen.
 
-Sensoren lassen sich aus Home Assistant auswählen. Die Widgets bieten eine Live-Vorschau für Schrift, Farben, Transparenz, Symbolgröße und Abstände. Namen, Reihenfolge und Positionen werden lokal gespeichert.
+Sensoren lassen sich aus Home Assistant auswählen. Die Widgets bieten eine Live-Vorschau für Schrift, Farben, Transparenz, Symbolgröße und Abstände. Positionen werden getrennt nach Monitoraufstellung, Auflösung und lokaler oder RDP-Sitzung gespeichert.
 
 ## Screenshots
 
@@ -52,11 +60,13 @@ Sensoren lassen sich aus Home Assistant auswählen. Die Widgets bieten eine Live
 
 ## Einstellungen sichern
 
-Im Rechtsklickmenü des Programm-Icons exportiert **Einstellungen sichern…** die Widget-Konfiguration, Positionen und Solar-Sensorzuordnungen als JSON-Datei. Die Home-Assistant-Adresse und der Zugriffstoken bleiben lokal. Zielinstallation zuerst mit Home Assistant verbinden, dann **Einstellungen wiederherstellen…** wählen und die App erneut starten.
+Unter **Rechtsklick auf das Programm-Icon → Einstellungen** exportiert **Einstellungen sichern…** die Widget-Konfiguration, Positionen und Solar-Sensorzuordnungen als JSON-Datei. Die Home-Assistant-Adresse und der Zugriffstoken bleiben lokal. Zielinstallation zuerst mit Home Assistant verbinden, dann **Einstellungen wiederherstellen…** wählen und die App erneut starten.
+
+In denselben Programmeinstellungen lässt sich der Windows-Autostart verwalten. Die Store-Ausgabe öffnet dafür die Windows-Seite für Autostart-Apps.
 
 ## Bauen und starten
 
-Unter Windows **Build.cmd** ausführen. Das Skript verwendet den .NET-Framework-Compiler und erzeugt **SolarKachel.exe** sowie **SolarKachel-Setup.exe**. Der Installer richtet die App im aktuellen Windows-Konto ein. Die Programmdatei kann auch direkt gestartet werden.
+Unter Windows **Build.cmd** ausführen. Das Skript verwendet den .NET-Framework-Compiler und erzeugt **DesktopWidgetsForHomeAssistant.exe** sowie **DesktopWidgetsForHomeAssistant-Setup.exe**. Der Installer richtet die App im aktuellen Windows-Konto ein. Die Programmdatei kann auch direkt gestartet werden.
 
 In den Einstellungen die eigene Home-Assistant-Adresse und einen langlebigen Zugriffstoken eintragen. Die App ruft Zustände über die [Home-Assistant-REST-API](https://contributors.home-assistant.io/core/internals/rest-api/#states) ab. Eine gemeinsame WebSocket-Verbindung meldet Zustandsänderungen sofort. Bei Verbindungsproblemen läuft die regelmäßige Abfrage alle 15 Sekunden weiter. Der Token wird lokal mit Windows DPAPI verschlüsselt.
 
@@ -65,7 +75,7 @@ In den Einstellungen die eigene Home-Assistant-Adresse und einen langlebigen Zug
 Die Material Design Icons von Pictogrammers unterliegen [Apache 2.0](MDI-LICENSE.txt). Die verwendeten Symbole sind in [MDI-NOTICE.txt](MDI-NOTICE.txt) aufgeführt.
 ## Microsoft Store
 
-Die Store-Ausgabe **1.2.0** verwendet das MSIX-Paket **1.2.0.0**. Beim ersten Start öffnet sie die Einrichtung mit leeren Feldern. Nach dem Verbinden lassen sich Widgets über das Programm-Icon im Infobereich hinzufügen. Die Store-Ausgabe verwendet ein eigenes lokales Profil.
+Die Store-Ausgabe richtet beim ersten Start eine eigene Home-Assistant-Verbindung mit leeren Feldern ein. Nach dem Verbinden lassen sich Widgets über das Programm-Icon im Infobereich hinzufügen. Die Store-Ausgabe verwendet ein eigenes lokales Profil. Hinweise zur Datenspeicherung stehen in der [Datenschutzerklärung](docs/datenschutz.md).
 
 Zum Paketieren mit dem Windows SDK die Paketidentität und die Herausgeberdaten aus Partner Center verwenden:
 

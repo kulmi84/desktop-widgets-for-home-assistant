@@ -2,8 +2,9 @@
 <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
          xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
          xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-         IgnorableNamespaces="uap rescap">
-  <Identity Name="DesktopWidgets.LocalPreview" Publisher="CN=Desktop Widgets Local Preview" Version="1.1.0.0" ProcessorArchitecture="neutral" />
+         xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+         IgnorableNamespaces="uap uap5 rescap">
+  <Identity Name="DesktopWidgets.LocalPreview" Publisher="CN=Desktop Widgets Local Preview" Version="1.0.0.0" ProcessorArchitecture="neutral" />
   <Properties>
     <DisplayName>Desktop Widgets for Home Assistant</DisplayName>
     <PublisherDisplayName>Desktop Widgets</PublisherDisplayName>
@@ -12,12 +13,17 @@
   <Dependencies>
     <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
   </Dependencies>
-  <Resources><Resource Language="de-DE" /></Resources>
+  <Resources><Resource Language="de-DE" /><Resource Language="en-US" /></Resources>
   <Applications>
-    <Application Id="DesktopWidgets" Executable="DesktopWidgets.Store.exe" EntryPoint="Windows.FullTrustApplication">
+    <Application Id="DesktopWidgets" Executable="DesktopWidgetsForHomeAssistant.Store.exe" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements DisplayName="Desktop Widgets for Home Assistant"
         Description="Unabhängige Desktop-Widgets für Home Assistant"
         Square44x44Logo="Assets\Logo44.png" Square150x150Logo="Assets\Logo150.png" BackgroundColor="transparent" />
+      <Extensions>
+        <uap5:Extension Category="windows.startupTask" Executable="DesktopWidgetsForHomeAssistant.Store.exe" EntryPoint="Windows.FullTrustApplication">
+          <uap5:StartupTask TaskId="DesktopWidgetsStartup" Enabled="false" DisplayName="Desktop Widgets for Home Assistant" />
+        </uap5:Extension>
+      </Extensions>
     </Application>
   </Applications>
   <Capabilities>
