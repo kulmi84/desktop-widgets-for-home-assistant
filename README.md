@@ -25,6 +25,20 @@ Entitäten vom Typ `button` und `input_button` lösen auf der Kachel über **Dr�
 Als zweites Widget steht **Solaranlage** zur Auswahl. Es zeigt PV-Erzeugung, Hausverbrauch und Akkustand in der Anordnung der Echo-Show-Kachel. Die Sensoren werden in den Einstellungen der frei platzierbaren **Solar**-Kachel ausgewählt. Für **PV + BKW** dort einen Sensor für die gemeinsame Erzeugung wählen.
 Unter **Einstellungen → Windows-Widgetboard… → Solaranlage · Nachkommastellen** lässt sich jeder Messwert automatisch oder mit 0 bis 6 Nachkommastellen anzeigen.
 
+### Bilder aus der lokalen Widgetboard-Vorschau
+
+![Windows-Widgetboard mit Garagenstatus, Türen und zwei Solarkacheln](docs/screenshots/windows-widgetboard-uebersicht-2611.1.png)
+
+| Schalter | Sensoren |
+| --- | --- |
+| ![Schalter und Beleuchtung](docs/screenshots/SwitchesPickerPreview.png) | ![Messwerte und Garagentorstatus](docs/screenshots/SensorsPickerPreview.png) |
+
+| Schalter und Sensoren | Solaranlage |
+| --- | --- |
+| ![Kombinierte Kachel für Schalter und Sensoren](docs/screenshots/MixedPickerPreview.png) | ![Solaranlage mit Live- und Tageswerten](docs/screenshots/SolarPickerPreviewV2.png) |
+
+[Weiterer Screenshot der Solaranlage im Widgetboard](docs/screenshots/windows-widgetboard-solaranlage.png)
+
 ## Automatisch einblenden, wenn eine Tür oder ein Garagentor offen ist
 
 Das Fenster-Tür-Widget muss nicht dauerhaft Platz auf dem Desktop belegen: Sobald mindestens ein ausgewählter Kontakt offen ist, erscheint es automatisch. Sind alle Kontakte wieder geschlossen, verschwindet es wieder. Das funktioniert beispielsweise mit einem Garagentor, einer Kellertür oder einem Fensterkontakt.
