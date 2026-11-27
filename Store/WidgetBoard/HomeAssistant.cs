@@ -9,6 +9,7 @@ using System.Text.Json.Serialization;
 sealed class HomeAssistant(string address, string token)
 {
     internal string?[] SolarEntities { get; private init; } = [];
+    internal string? GridExportEntity { get; private init; }
     static readonly HttpClient Client = new(new HttpClientHandler { AllowAutoRedirect = false })
     {
         Timeout = TimeSpan.FromSeconds(10)
@@ -34,7 +35,9 @@ sealed class HomeAssistant(string address, string token)
                 : [];
             return new HomeAssistant(uri.AbsoluteUri.TrimEnd('/'), Encoding.UTF8.GetString(plaintext))
             {
-                SolarEntities = entities
+                SolarEntities = entities,
+                GridExportEntity = settings.RootElement.TryGetProperty("GridExportEntity", out var export) &&
+                    export.ValueKind == JsonValueKind.String ? export.GetString() : null
             };
         }
         finally { CryptographicOperations.ZeroMemory(plaintext); }
@@ -89,4 +92,5 @@ sealed record EntityState(string State, EntityAttributes? Attributes);
 sealed record EntityAttributes(
     [property: JsonPropertyName("friendly_name")] string? Name,
     [property: JsonPropertyName("unit_of_measurement")] string? Unit,
-    [property: JsonPropertyName("device_class")] string? DeviceClass);
+    [property: JsonPropertyName("device_class")] string? DeviceClass,
+    [property: JsonPropertyName("icon")] string? Icon);

@@ -36,11 +36,8 @@ sealed class ProgramOptions : Form
         var connection = Group("Home Assistant", 12, 58);
         AddButton(connection, UiText.Get("Verbindung einrichten…", "Set up connection…"), 14, 20, 202, connect);
 #if STORE
-        var build = Registry.GetValue(@"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion",
-            "CurrentBuildNumber", null) as string;
-        int buildNumber;
-        if (int.TryParse(build, out buildNumber) && buildNumber >= 22000)
-            AddButton(connection, UiText.Get("Windows-Widgetboard…", "Windows Widgets Board…"), 226, 20, 212, () =>
+        if (BoardOptions.IsSupported())
+            AddButton(connection, BoardOptions.MenuLabel, 226, 20, 212, () =>
             {
                 using (var dialog = new BoardOptions(getSettings())) dialog.ShowDialog(this);
             });

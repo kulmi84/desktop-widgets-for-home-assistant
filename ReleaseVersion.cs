@@ -10,7 +10,7 @@ internal static class ReleaseVersion
     internal const string ProductName = "Desktop Widgets for Home Assistant";
     internal const string SolarName = "Solar Widget Home Assistant";
     internal const string Version = "1.0.1";
-    internal const string Build = "2411.10";
+    internal const string Build = "2611.6";
     internal const string WindowsVersion = Version + ".0";
     internal const string Display = "Version " + Version + " \u00B7 Build " + Build;
 #if STORE

@@ -37,8 +37,9 @@ try {
         Move-Item -LiteralPath (Join-Path $providerOutput 'Microsoft.Windows.Widgets.winmd') -Destination $stage
 
         Copy-Item -LiteralPath (Join-Path $root 'MDI-NOTICE.txt'),(Join-Path $root 'MDI-LICENSE.txt') -Destination $stage
-        Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'WidgetBoardPreview.png') -Destination $assets
-        Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'SolarBoardPreview.png') -Destination $assets
+        foreach ($screenshot in 'MixedPickerPreview.png', 'SwitchesPickerPreview.png', 'SensorsPickerPreview.png', 'SolarPickerPreviewV2.png') {
+            Copy-Item -LiteralPath (Join-Path $PSScriptRoot $screenshot) -Destination $assets
+        }
         [xml]$manifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'AppxManifest.xml') -Raw
         $manifest.Package.Identity.SetAttribute('Name', $IdentityName)
         $manifest.Package.Identity.SetAttribute('Publisher', $Publisher)

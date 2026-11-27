@@ -823,7 +823,8 @@ sealed class Options : Form
 
         internal SensorPicker(SolarTile.Sensor[] sensors, string unit, string current)
         {
-            Text = unit == "board" ? UiText.Get("Entität auswählen", "Select entity") : UiText.Get("Sensor auswählen", "Select sensor");
+            Text = unit == "board_action" ? UiText.Get("Schalter oder Taster auswählen", "Select switch or button")
+                : unit == "board" ? UiText.Get("Entität auswählen", "Select entity") : UiText.Get("Sensor auswählen", "Select sensor");
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = MinimizeBox = false;
@@ -834,10 +835,13 @@ sealed class Options : Form
             ForeColor = Color.WhiteSmoke;
             int dark = 1;
             DwmSetWindowAttribute(Handle, 20, ref dark, sizeof(int));
-            if (unit == "board") SettingsTheme.UseRoundedWindowCorners(Handle);
+            if (unit == "board" || unit == "board_action" || unit == "daily_energy") SettingsTheme.UseRoundedWindowCorners(Handle);
 
             var matches = (sensors ?? new SolarTile.Sensor[0]).Where(sensor => sensor != null &&
                 sensor.entity_id != null && sensor.attributes != null && (unit == "board" ? BoardSelection.IsSupported(sensor.entity_id)
+                    : unit == "board_action" ? BoardSelection.IsSwitch(sensor.entity_id) || BoardSelection.IsButton(sensor.entity_id)
+                    : unit == "daily_energy" ? BoardSelection.IsSolarDailySensor(sensor.entity_id) &&
+                        new[] { "Wh", "kWh", "MWh", "GWh" }.Contains(sensor.attributes.unit_of_measurement)
                     : unit == "any_sensor" ? DoorWidget.IsSensor(sensor.entity_id) : unit == "window_cover"
                     ? HeatingWidget.IsCover(sensor.entity_id) && !new[] { "garage", "door", "gate" }.Contains(sensor.attributes.device_class)
                     : unit == "climate" ? HeatingWidget.IsClimate(sensor.entity_id) : unit == "switch" ? DoorWidget.IsSwitchEntity(sensor.entity_id) : unit == null
@@ -848,7 +852,9 @@ sealed class Options : Form
                         ? sensor.attributes.unit_of_measurement == "%"
                         : new[] { "W", "kW", "MW" }.Contains(sensor.attributes.unit_of_measurement))))
                 .OrderBy(sensor => sensor.Display).ToArray();
-            var label = new Label { Text = unit == "%" ? UiText.Get("Sensoren mit % (Akkustand)", "Battery sensors in %") : UiText.Get("Leistungssensoren mit W, kW oder MW", "Power sensors in W, kW or MW"),
+            var label = new Label { Text = unit == "daily_energy" ? UiText.Get("Energiesensor für den heutigen Tag auswählen (z. B. kWh).",
+                "Select an energy sensor for today (e.g. kWh).") :
+                unit == "%" ? UiText.Get("Sensoren mit % (Akkustand)", "Battery sensors in %") : UiText.Get("Leistungssensoren mit W, kW oder MW", "Power sensors in W, kW or MW"),
                 AutoSize = true, Location = new Point(12, 12) };
             var search = new TextBox { Bounds = new Rectangle(12, 38, 636, 24), BackColor = Input,
                 ForeColor = ForeColor, AccessibleName = UiText.Get("Sensoren suchen", "Search sensors") };
@@ -880,6 +886,11 @@ sealed class Options : Form
             };
             search.TextChanged += delegate { filter(); };
             Controls.AddRange(new Control[] { label, search, list, cancel, accept });
+            if (unit == "board" || unit == "board_action" || unit == "daily_energy")
+            {
+                SettingsTheme.ApplyMonitorStyle(this);
+                list.BackColor = SettingsTheme.MonitorInput;
+            }
             AcceptButton = accept;
             CancelButton = cancel;
             filter();
@@ -1037,6 +1048,21 @@ sealed class SolarTile : Form
             sensorMenu.DropDownOpening += delegate { PopulateInstanceMenu(sensorMenu, false); };
             PopulateInstanceMenu(sensorMenu, false);
             trayMenu.Items.Add(addWidget);
+#if STORE
+            if (BoardOptions.IsSupported())
+                trayMenu.Items.Add(BoardOptions.MenuLabel, null, delegate
+                {
+                    using (var dialog = new BoardOptions(settings))
+                    {
+                        if (programOptions != null && !programOptions.IsDisposed) dialog.ShowDialog(programOptions);
+                        else
+                        {
+                            dialog.StartPosition = FormStartPosition.CenterScreen;
+                            dialog.ShowDialog();
+                        }
+                    }
+                });
+#endif
             trayMenu.Items.Add(UiText.Get("Einstellungen", "Settings"), null, delegate { OpenProgramOptions(); });
             trayMenu.Items.Add(UiText.Get("Programm beenden", "Exit application"), null, delegate { ExitWidgets(); });
             tray = new NotifyIcon { Icon = WidgetIcon.Load(), Text = ReleaseVersion.ProductName, ContextMenuStrip = trayMenu };

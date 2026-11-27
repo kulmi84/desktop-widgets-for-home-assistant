@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.Windows.Widgets;
 using Microsoft.Windows.Widgets.Providers;
@@ -7,7 +8,11 @@ using Microsoft.Windows.Widgets.Providers;
 sealed class WidgetProvider : IWidgetProvider, IWidgetProvider2
 {
     const string SolarDefinition = "SolarInstallation";
-    readonly ConcurrentDictionary<string, (bool Solar, WidgetSize Size)> active = new();
+    const string SolarIconsDefinition = "SolarInstallationIcons";
+    const string HomeAssistantDefinition = "HomeAssistant";
+    const string SwitchesDefinition = "HomeAssistantSwitches";
+    const string SensorsDefinition = "HomeAssistantSensors";
+    readonly ConcurrentDictionary<string, (string Definition, WidgetSize Size)> active = new();
     readonly SemaphoreSlim updates = new(1);
     readonly Timer refresh;
 
@@ -19,7 +24,7 @@ sealed class WidgetProvider : IWidgetProvider, IWidgetProvider2
             Schedule(async () =>
             {
                 foreach (string id in active.Keys)
-                    if (active.TryGetValue(id, out var widget)) await UpdateAsync(id, widget.Solar, widget.Size);
+                    if (active.TryGetValue(id, out var widget)) await UpdateAsync(id, widget.Definition, widget.Size);
             }, skipIfBusy: true);
         }, null, TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(15));
     }
@@ -30,14 +35,18 @@ sealed class WidgetProvider : IWidgetProvider, IWidgetProvider2
         var card = new WidgetCard();
         card.Message(UiText.Get("Home-Assistant-Werte werden geladen…", "Loading Home Assistant values…"));
         string? profileId = null;
-        if (context.DefinitionId != SolarDefinition)
+        bool solar = IsSolar(context.DefinitionId);
+        if (solar || IsHomeAssistant(context.DefinitionId))
         {
             try
             {
                 var assigned = WidgetManager.GetDefault().GetWidgetInfos()
-                    .Where(widget => widget.WidgetContext.Id != id && widget.WidgetContext.DefinitionId == "HomeAssistant")
+                    .Where(widget => widget.WidgetContext.Id != id && (solar
+                        ? IsSolar(widget.WidgetContext.DefinitionId) : widget.WidgetContext.DefinitionId == context.DefinitionId))
                     .Select(widget => ProfileId(widget.CustomState)).ToHashSet(StringComparer.Ordinal);
-                profileId = LoadConfiguration().AllProfiles().FirstOrDefault(profile => !assigned.Contains(profile.Id))?.Id ?? "";
+                var config = LoadConfiguration();
+                profileId = (solar ? config.SolarChoices() : ProfilesFor(config, context.DefinitionId))
+                    .FirstOrDefault(profile => !assigned.Contains(profile.Id))?.Id ?? "";
             }
             catch (Exception error) { Trace.TraceWarning("Widget profile selection failed (0x{0:X8}).", error.HResult); }
         }
@@ -49,7 +58,7 @@ sealed class WidgetProvider : IWidgetProvider, IWidgetProvider2
     {
         var context = args.WidgetContext;
         string id = context.Id;
-        var layout = (context.DefinitionId == SolarDefinition, context.Size);
+        var layout = (context.DefinitionId, context.Size);
         if (active.TryGetValue(id, out var previous)) active.TryUpdate(id, layout, previous);
         QueueUpdate(id, layout.Item1, layout.Size);
     }
@@ -57,9 +66,9 @@ sealed class WidgetProvider : IWidgetProvider, IWidgetProvider2
     public void Activate(WidgetContext context)
     {
         string id = context.Id;
-        bool solar = context.DefinitionId == SolarDefinition;
-        active[id] = (solar, context.Size);
-        QueueUpdate(id, solar, context.Size);
+        string definition = context.DefinitionId;
+        active[id] = (definition, context.Size);
+        QueueUpdate(id, definition, context.Size);
     }
 
     public void Deactivate(string id) => active.TryRemove(id, out _);
@@ -67,20 +76,23 @@ sealed class WidgetProvider : IWidgetProvider, IWidgetProvider2
     public void OnCustomizationRequested(WidgetCustomizationRequestedArgs args)
     {
         var context = args.WidgetContext;
-        QueueUpdate(context.Id, solar: false, size: context.Size);
+        QueueUpdate(context.Id, context.DefinitionId, context.Size);
     }
 
     public void OnActionInvoked(WidgetActionInvokedArgs args)
     {
         string verb = args.Verb;
-        if (verb is not ("set-switch" or "press-button" or "select-profile") || args.WidgetContext.DefinitionId != "HomeAssistant") return;
+        string definition = args.WidgetContext.DefinitionId;
+        if (verb != "select-profile" && (definition == SensorsDefinition || !IsHomeAssistant(definition)
+            || verb is not ("set-switch" or "press-button"))) return;
+        if (!IsHomeAssistant(definition) && !IsSolar(definition)) return;
         string id = args.WidgetContext.Id;
         WidgetSize size = args.WidgetContext.Size;
         string data = args.Data;
-        Schedule(() => UpdateAsync(id, solar: false, size, verb, data));
+        Schedule(() => UpdateAsync(id, definition, size, verb, data));
     }
 
-    void QueueUpdate(string id, bool solar, WidgetSize size) => Schedule(() => UpdateAsync(id, solar, size));
+    void QueueUpdate(string id, string definition, WidgetSize size) => Schedule(() => UpdateAsync(id, definition, size));
 
     void Schedule(Func<Task> update, bool skipIfBusy = false)
     {
@@ -102,7 +114,7 @@ sealed class WidgetProvider : IWidgetProvider, IWidgetProvider2
             : JsonSerializer.Deserialize<BoardConfiguration>(contents) ?? new BoardConfiguration();
     }
 
-    static async Task UpdateAsync(string id, bool solar, WidgetSize size, string? verb = null, string? action = null)
+    static async Task UpdateAsync(string id, string definition, WidgetSize size, string? verb = null, string? action = null)
     {
         var card = new WidgetCard(size == WidgetSize.Small, size == WidgetSize.Large);
         BoardProfile[]? profiles = null;
@@ -111,9 +123,10 @@ sealed class WidgetProvider : IWidgetProvider, IWidgetProvider2
         try
         {
             var config = LoadConfiguration();
-            if (!solar)
+            bool solar = IsSolar(definition);
+            if (IsHomeAssistant(definition) || solar)
             {
-                profiles = config.AllProfiles();
+                profiles = solar ? config.SolarChoices() : ProfilesFor(config, definition);
                 profileId = ProfileId(WidgetManager.GetDefault().GetWidgetInfo(id).CustomState);
                 if (verb == "select-profile" && action != null)
                 {
@@ -131,21 +144,36 @@ sealed class WidgetProvider : IWidgetProvider, IWidgetProvider2
                 card.Message(UiText.Get("Home Assistant in den Programmeinstellungen verbinden.",
                     "Connect Home Assistant in the app settings."));
             else if (solar)
-                await AddSolarReadings(card, connection, config);
+            {
+                var selected = profiles!.FirstOrDefault(profile => profile.Id == profileId) as SolarBoardProfile;
+                string? solarName = selected?.Name ?? config.DefaultSolarName;
+                if (!string.IsNullOrWhiteSpace(solarName)) card.ProfileName(solarName.Trim());
+                var solarSettings = selected?.Solar ?? (SolarBoardSettings)config;
+                await AddSolarReadings(card, connection, solarSettings,
+                    solarSettings.SolarShowIcons ?? (definition == SolarIconsDefinition), size == WidgetSize.Small, selected);
+            }
             else
             {
                 var selected = profiles!.FirstOrDefault(profile => profile.Id == profileId) ?? profiles![0];
-                var entities = (selected.Entities ?? []).OfType<string>().Where(BoardSelection.IsSupported)
-                    .Distinct(StringComparer.Ordinal).Take(BoardSelection.Capacity).ToArray();
-                if (selected.Id.Length != 0) card.ProfileName(selected.Name);
-                if (entities.Length == 0)
+                var text = selected.WidgetText ?? new BoardWidgetText();
+                string control = text.ActionEntity ?? "";
+                bool hasControl = definition != SensorsDefinition && IsControl(control);
+                bool small = size == WidgetSize.Small;
+                int visibleCapacity = small ? BoardSelection.SmallCapacity
+                    : size == WidgetSize.Large ? BoardSelection.Capacity : BoardSelection.MediumCapacity;
+                var slots = (selected.Entities ?? []).Take(BoardSelection.Capacity).Select((entity, index) => (entity, index))
+                    .Where(slot => slot.entity != null && AllowsEntity(definition, slot.entity) &&
+                        (!hasControl || slot.entity != control)).Take(visibleCapacity).ToArray();
+                var entities = slots.Select(slot => slot.entity).ToArray();
+                string? description = text.UseCustomDescription ? text.Description : selected.Id.Length != 0 ? selected.Name : null;
+                if (entities.Length == 0 && !hasControl)
                     card.Message(UiText.Get("Entitäten unter Einstellungen → Windows-Widgetboard auswählen.",
                         "Select entities under Settings → Windows Widgets Board."));
                 if (verb is "set-switch" or "press-button" && action != null)
                 {
                     using var payload = JsonDocument.Parse(action);
                     string? entity = payload.RootElement.GetProperty("entity").GetString();
-                    if (entity != null && entities.Contains(entity, StringComparer.Ordinal))
+                    if (entity != null && (entities.Contains(entity, StringComparer.Ordinal) || (hasControl && entity == control)))
                     {
                         try
                         {
@@ -160,12 +188,47 @@ sealed class WidgetProvider : IWidgetProvider, IWidgetProvider2
                         }
                     }
                 }
-                var readings = await Task.WhenAll(entities.Select(connection.ReadAsync));
+                var readingTasks = entities.Distinct(StringComparer.Ordinal)
+                    .ToDictionary(entity => entity, connection.ReadAsync, StringComparer.Ordinal);
+                var readingsTask = Task.WhenAll(entities.Select(entity => readingTasks[entity]));
+                var controlTask = hasControl ? ReadOptionalSensorAsync(connection, control, allowControl: true)
+                    : Task.FromResult<EntityState?>(null);
+                await Task.WhenAll(readingsTask, controlTask);
+                var readings = await readingsTask;
+                bool dense = !small && entities.Length > BoardSelection.SmallCapacity;
+                int firstContact = Array.FindIndex(entities, entity =>
+                    WidgetCard.IsContact(entity, readings[Array.IndexOf(entities, entity)]));
+                int controlRow = !hasControl || definition == SwitchesDefinition ? -1 : WidgetCard.IsGarage(control)
+                    ? Array.FindIndex(entities, entity => entity.StartsWith("binary_sensor.", StringComparison.Ordinal)
+                        && WidgetCard.IsGarage(entity))
+                    : Math.Max(firstContact, 0);
+                string? title = small && !string.IsNullOrWhiteSpace(text.CompactTitle) ? text.CompactTitle
+                    : (!small || firstContact < 0) ? description : null;
+                if (!string.IsNullOrWhiteSpace(title)) card.ProfileName(title);
+                var rowAction = hasControl ? card.EntityAction(control, (await controlTask)?.State, text.ActionCaption) : null;
                 for (int i = 0; i < entities.Length; i++)
                 {
-                    if (selected.HighlightValues) card.AddHighlightedEntity(entities[i], readings[i], i, entities.Length);
-                    else card.Add(entities[i], readings[i]);
+                    string? caption = i == 0 ? text.StatusCaption : null;
+                    var actionForRow = controlRow >= 0 && entities[i] == entities[controlRow] ? rowAction : null;
+                    int slot = slots[i].index;
+                    bool hideName = small && (text.CompactHideNames ?? []).ElementAtOrDefault(slot);
+                    string? customCaption = small ? (text.CompactCaptions ?? []).ElementAtOrDefault(slot) : null;
+                    if (!string.IsNullOrWhiteSpace(customCaption)) caption = customCaption;
+                    string? fontSize = small ? (text.CompactSizes ?? []).ElementAtOrDefault(slot) : null;
+                    string? icon = small ? (text.CompactIcons ?? []).ElementAtOrDefault(slot) : null;
+                    bool contact = WidgetCard.IsContact(entities[i], readings[i]);
+                    if (small && contact && selected.HighlightValues && string.IsNullOrWhiteSpace(fontSize))
+                        fontSize = "Large";
+                    if (dense || (small && (hideName || !string.IsNullOrWhiteSpace(customCaption) || !string.IsNullOrWhiteSpace(fontSize)
+                        || !string.IsNullOrWhiteSpace(icon) || contact)))
+                        card.AddCompactStatus(entities[i], readings[i], caption, actionForRow ?? card.EntityAction(entities[i], readings[i]?.State),
+                            hideName, dense ? "Small" : fontSize, icon);
+                    else if (selected.HighlightValues)
+                        card.AddHighlightedEntity(entities[i], readings[i], i, entities.Length, caption, actionForRow);
+                    else card.Add(entities[i], readings[i], caption, actionForRow);
                 }
+                if (hasControl && (entities.Length == 0 || definition == SwitchesDefinition))
+                    card.AddControl(control, await controlTask, text.ActionCaption);
             }
         }
         catch (Exception)
@@ -178,22 +241,97 @@ sealed class WidgetProvider : IWidgetProvider, IWidgetProvider2
         Publish(id, card, profileId: saveProfile);
     }
 
-    static async Task AddSolarReadings(WidgetCard card, HomeAssistant connection, BoardConfiguration config)
+    static bool IsSolar(string definition) => definition is SolarDefinition or SolarIconsDefinition;
+
+    static bool IsHomeAssistant(string definition) =>
+        definition is HomeAssistantDefinition or SwitchesDefinition or SensorsDefinition;
+
+    static bool IsControl(string entity) => BoardSelection.IsSwitch(entity) || BoardSelection.IsButton(entity);
+
+    static bool AllowsEntity(string definition, string entity) => BoardSelection.IsSupported(entity) &&
+        (definition switch
+        {
+            SwitchesDefinition => IsControl(entity),
+            SensorsDefinition => !IsControl(entity),
+            _ => true
+        });
+
+    static BoardProfile[] ProfilesFor(BoardConfiguration config, string definition)
     {
-        // The stored desktop order is PV, battery, home, grid. The Echo card shows battery last.
-        var entities = new[] { 0, 2, 1 }.Select(i => connection.SolarEntities.ElementAtOrDefault(i))
+        var profiles = config.AllProfiles();
+        if (definition == HomeAssistantDefinition) return profiles;
+        var matching = profiles.Where(profile =>
+            (profile.Entities ?? []).Any(entity => entity != null && AllowsEntity(definition, entity)) ||
+            (definition == SwitchesDefinition && IsControl(profile.WidgetText?.ActionEntity ?? ""))).ToArray();
+        return matching.Length == 0 ? profiles : matching;
+    }
+
+    static async Task AddSolarReadings(WidgetCard card, HomeAssistant connection, SolarBoardSettings config,
+        bool icons, bool compact, SolarBoardProfile? profile)
+    {
+        var liveSensors = profile == null
+            ? ((BoardConfiguration)config).DefaultSolarSensors(connection.SolarEntities!, connection.GridExportEntity!)
+            : Enumerable.Range(0, 4).Select(i => (profile.Entities ?? []).ElementAtOrDefault(i))
+                .Append(profile.GridExportEntity).ToArray();
+        var entities = liveSensors.Take(3)
             .Select(entity => entity != null && entity.StartsWith("sensor.", StringComparison.Ordinal) &&
                 BoardSelection.IsSupported(entity) ? entity : null).ToArray();
-        if (entities.All(entity => entity == null))
+        var dailyEntities = compact ? [] : (config.SolarDailyEntities ?? [])
+            .Take(BoardSelection.SolarDailyLabels.Length).ToArray();
+        string? grid = liveSensors[3];
+        string? export = liveSensors[4];
+        bool showGrid = BoardSelection.IsSolarDailySensor(grid ?? "");
+        if (entities.All(entity => entity == null) && !showGrid && !dailyEntities.Any(BoardSelection.IsSolarDailySensor))
         {
-            card.Message(UiText.Get("PV, Hausverbrauch und Akku in den Einstellungen der Solar-Kachel auswählen.",
-                "Select PV, home consumption and battery sensors in the desktop Solar widget settings."));
+            card.Message(UiText.Get("Sensoren in den Einstellungen der Solarkachel auswählen.",
+                "Select sensors in the solar widget settings."));
             return;
         }
-
-        var readings = await Task.WhenAll(entities.Select(entity =>
+        var liveTask = Task.WhenAll(entities.Select(entity =>
             entity == null ? Task.FromResult<EntityState?>(null) : connection.ReadAsync(entity)));
-        card.AddSolarReadings(readings, config);
+        var dailyTask = Task.WhenAll(dailyEntities.Select(entity => ReadOptionalSensorAsync(connection, entity)));
+        var gridTask = showGrid ? ReadGridAsync(connection, grid!, export) : Task.FromResult<EntityState?>(null);
+        await Task.WhenAll(liveTask, dailyTask, gridTask);
+        var live = await liveTask;
+        var visible = profile == null && ((BoardConfiguration)config).SolarLiveEntities?.Length != 5 ? null
+            : entities.Select(entity => entity != null).Append(showGrid).ToArray();
+        card.AddSolarReadings(showGrid ? [.. live, await gridTask] : live, config, icons, await dailyTask, visible);
+    }
+
+    static async Task<EntityState?> ReadGridAsync(HomeAssistant connection, string grid, string? export)
+    {
+        var primary = ReadOptionalSensorAsync(connection, grid);
+        bool separateExport = BoardSelection.IsSolarDailySensor(export ?? "");
+        var exported = separateExport ? ReadOptionalSensorAsync(connection, export) : Task.FromResult<EntityState?>(null);
+        var input = await primary;
+        var output = await exported;
+        if (PowerInWatts(input) is not decimal imported) return null;
+        decimal? exportWatts = separateExport ? PowerInWatts(output) : 0;
+        if (!exportWatts.HasValue) return null;
+        return new EntityState((imported - exportWatts.Value).ToString(CultureInfo.InvariantCulture),
+            new EntityAttributes(null, "W", "power", null));
+    }
+
+    static decimal? PowerInWatts(EntityState? reading)
+    {
+        if (!decimal.TryParse(reading?.State, NumberStyles.Float, CultureInfo.InvariantCulture, out var power)) return null;
+        return reading?.Attributes?.Unit switch
+        {
+            "W" => power,
+            "kW" when decimal.Abs(power) <= decimal.MaxValue / 1000 => power * 1000,
+            "MW" when decimal.Abs(power) <= decimal.MaxValue / 1000000 => power * 1000000,
+            _ => null
+        };
+    }
+
+    static async Task<EntityState?> ReadOptionalSensorAsync(HomeAssistant connection, string? entity, bool allowControl = false)
+    {
+        if (entity == null || !(allowControl ? BoardSelection.IsSupported(entity) : BoardSelection.IsSolarDailySensor(entity))) return null;
+        try { return await connection.ReadAsync(entity); }
+        catch (Exception error) when (error is HttpRequestException or OperationCanceledException or JsonException or NotSupportedException)
+        {
+            return null;
+        }
     }
 
     static string ProfileId(string? state) => state is null or "default" ? "" : state;
