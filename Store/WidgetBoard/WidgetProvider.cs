@@ -12,6 +12,7 @@ sealed class WidgetProvider : IWidgetProvider, IWidgetProvider2
     const string HomeAssistantDefinition = "HomeAssistant";
     const string SwitchesDefinition = "HomeAssistantSwitches";
     const string SensorsDefinition = "HomeAssistantSensors";
+    const string TwoColumnsDefinition = "HomeAssistantTwoColumns";
     readonly ConcurrentDictionary<string, (string Definition, WidgetSize Size)> active = new();
     readonly SemaphoreSlim updates = new(1);
     readonly Timer refresh;
@@ -45,8 +46,19 @@ sealed class WidgetProvider : IWidgetProvider, IWidgetProvider2
                         ? IsSolar(widget.WidgetContext.DefinitionId) : widget.WidgetContext.DefinitionId == context.DefinitionId))
                     .Select(widget => ProfileId(widget.CustomState)).ToHashSet(StringComparer.Ordinal);
                 var config = LoadConfiguration();
-                profileId = (solar ? config.SolarChoices() : ProfilesFor(config, context.DefinitionId))
+                var choices = solar ? config.SolarChoices() : ProfilesFor(config, context.DefinitionId);
+                int type = context.DefinitionId switch
+                {
+                    SwitchesDefinition => 1,
+                    SensorsDefinition => 2,
+                    TwoColumnsDefinition => 3,
+                    _ => 0
+                };
+                var matching = solar ? choices : choices.Where(profile => profile.WidgetText?.PreferredWidgetType == type).ToArray();
+                profileId = (matching.Length == 0 ? choices : matching)
                     .FirstOrDefault(profile => !assigned.Contains(profile.Id))?.Id ?? "";
+                if (!solar && matching.Length != 0 && matching.All(profile => assigned.Contains(profile.Id)))
+                    profileId = matching[0].Id;
             }
             catch (Exception error) { Trace.TraceWarning("Widget profile selection failed (0x{0:X8}).", error.HResult); }
         }
@@ -83,7 +95,7 @@ sealed class WidgetProvider : IWidgetProvider, IWidgetProvider2
     {
         string verb = args.Verb;
         string definition = args.WidgetContext.DefinitionId;
-        if (verb != "select-profile" && (definition == SensorsDefinition || !IsHomeAssistant(definition)
+        if (verb != "select-profile" && (!IsHomeAssistant(definition)
             || verb is not ("set-switch" or "press-button"))) return;
         if (!IsHomeAssistant(definition) && !IsSolar(definition)) return;
         string id = args.WidgetContext.Id;
@@ -159,21 +171,28 @@ sealed class WidgetProvider : IWidgetProvider, IWidgetProvider2
                 string control = text.ActionEntity ?? "";
                 bool hasControl = definition != SensorsDefinition && IsControl(control);
                 bool small = size == WidgetSize.Small;
-                int visibleCapacity = small ? BoardSelection.SmallCapacity
+                bool twoColumns = definition == TwoColumnsDefinition;
+                int layoutIndex = twoColumns ? 3 : small ? 0 : size == WidgetSize.Large ? 2 : 1;
+                bool highlighted = text.HighlightFor(layoutIndex, !twoColumns && selected.HighlightValues);
+                int visibleCapacity = twoColumns ? BoardSelection.TwoColumnCapacity : small ? BoardSelection.SmallCapacity
                     : size == WidgetSize.Large ? BoardSelection.Capacity : BoardSelection.MediumCapacity;
-                var slots = (selected.Entities ?? []).Take(BoardSelection.Capacity).Select((entity, index) => (entity, index))
+                var slots = (selected.Entities ?? []).Take(twoColumns ? BoardSelection.TwoColumnCapacity : BoardSelection.Capacity)
+                    .Select((entity, index) => (entity, index))
                     .Where(slot => slot.entity != null && AllowsEntity(definition, slot.entity) &&
                         (!hasControl || slot.entity != control)).Take(visibleCapacity).ToArray();
                 var entities = slots.Select(slot => slot.entity).ToArray();
+                var rowControls = slots.Select(slot => (text.RowActions ?? []).ElementAtOrDefault(slot.index) ?? "")
+                    .Where(IsControl).Distinct(StringComparer.Ordinal).ToArray();
                 string? description = text.UseCustomDescription ? text.Description : selected.Id.Length != 0 ? selected.Name : null;
                 if (entities.Length == 0 && !hasControl)
-                    card.Message(UiText.Get("Entitäten unter Einstellungen → Windows-Widgetboard auswählen.",
-                        "Select entities under Settings → Windows Widgets Board."));
+                    card.Message(UiText.Get("Entitäten unter Einstellungen → Windows Widgets auswählen.",
+                        "Select entities under Settings → Windows Widgets."));
                 if (verb is "set-switch" or "press-button" && action != null)
                 {
                     using var payload = JsonDocument.Parse(action);
                     string? entity = payload.RootElement.GetProperty("entity").GetString();
-                    if (entity != null && (entities.Contains(entity, StringComparer.Ordinal) || (hasControl && entity == control)))
+                    if (entity != null && (rowControls.Contains(entity, StringComparer.Ordinal) ||
+                        (definition != SensorsDefinition && (entities.Contains(entity, StringComparer.Ordinal) || (hasControl && entity == control)))))
                     {
                         try
                         {
@@ -193,7 +212,9 @@ sealed class WidgetProvider : IWidgetProvider, IWidgetProvider2
                 var readingsTask = Task.WhenAll(entities.Select(entity => readingTasks[entity]));
                 var controlTask = hasControl ? ReadOptionalSensorAsync(connection, control, allowControl: true)
                     : Task.FromResult<EntityState?>(null);
-                await Task.WhenAll(readingsTask, controlTask);
+                var rowControlTasks = rowControls.ToDictionary(entity => entity,
+                    entity => ReadOptionalSensorAsync(connection, entity, allowControl: true), StringComparer.Ordinal);
+                await Task.WhenAll(rowControlTasks.Values.Cast<Task>().Append(readingsTask).Append(controlTask));
                 var readings = await readingsTask;
                 bool dense = !small && entities.Length > BoardSelection.SmallCapacity;
                 int firstContact = Array.FindIndex(entities, entity =>
@@ -204,29 +225,41 @@ sealed class WidgetProvider : IWidgetProvider, IWidgetProvider2
                     : Math.Max(firstContact, 0);
                 string? title = small && !string.IsNullOrWhiteSpace(text.CompactTitle) ? text.CompactTitle
                     : (!small || firstContact < 0) ? description : null;
-                if (!string.IsNullOrWhiteSpace(title)) card.ProfileName(title);
+                if (!text.HideTitle && !string.IsNullOrWhiteSpace(title)) card.ProfileName(title);
                 var rowAction = hasControl ? card.EntityAction(control, (await controlTask)?.State, text.ActionCaption) : null;
-                for (int i = 0; i < entities.Length; i++)
+                int rowStart = card.RowCount;
+                int columnSplit = -1;
+                var rightColumns = twoColumns ? BoardWidgetText.RightColumns(slots.Select(slot => slot.index).ToArray(), text.Columns)
+                    : new bool[entities.Length];
+                foreach (int i in Enumerable.Range(0, entities.Length).OrderBy(index => rightColumns[index]))
                 {
+                    if (rightColumns[i] && columnSplit < 0) columnSplit = card.RowCount;
                     string? caption = i == 0 ? text.StatusCaption : null;
-                    var actionForRow = controlRow >= 0 && entities[i] == entities[controlRow] ? rowAction : null;
                     int slot = slots[i].index;
-                    bool hideName = small && (text.CompactHideNames ?? []).ElementAtOrDefault(slot);
-                    string? customCaption = small ? (text.CompactCaptions ?? []).ElementAtOrDefault(slot) : null;
+                    string rowControl = (text.RowActions ?? []).ElementAtOrDefault(slot) ?? "";
+                    var actionForRow = rowControlTasks.TryGetValue(rowControl, out var rowControlTask)
+                        ? card.EntityAction(rowControl, (await rowControlTask)?.State)
+                        : i == controlRow ? rowAction : null;
+                    bool hideName = (text.CompactHideNames ?? []).ElementAtOrDefault(slot);
+                    string? customCaption = (text.CompactCaptions ?? []).ElementAtOrDefault(slot);
                     if (!string.IsNullOrWhiteSpace(customCaption)) caption = customCaption;
-                    string? fontSize = small ? (text.CompactSizes ?? []).ElementAtOrDefault(slot) : null;
-                    string? icon = small ? (text.CompactIcons ?? []).ElementAtOrDefault(slot) : null;
+                    string? fontSize = (text.CompactSizes ?? []).ElementAtOrDefault(slot);
+                    string? icon = (text.CompactIcons ?? []).ElementAtOrDefault(slot);
                     bool contact = WidgetCard.IsContact(entities[i], readings[i]);
-                    if (small && contact && selected.HighlightValues && string.IsNullOrWhiteSpace(fontSize))
+                    if (highlighted && ((small && contact) || dense || twoColumns) && string.IsNullOrWhiteSpace(fontSize))
                         fontSize = "Large";
-                    if (dense || (small && (hideName || !string.IsNullOrWhiteSpace(customCaption) || !string.IsNullOrWhiteSpace(fontSize)
-                        || !string.IsNullOrWhiteSpace(icon) || contact)))
+                    if (twoColumns)
+                        card.Add(entities[i], readings[i], caption, actionForRow, icon, hideName, fontSize, true);
+                    else if (dense || hideName || !string.IsNullOrWhiteSpace(fontSize)
+                        || (small && (!string.IsNullOrWhiteSpace(icon) || !string.IsNullOrWhiteSpace(customCaption) || contact)))
                         card.AddCompactStatus(entities[i], readings[i], caption, actionForRow ?? card.EntityAction(entities[i], readings[i]?.State),
-                            hideName, dense ? "Small" : fontSize, icon);
-                    else if (selected.HighlightValues)
-                        card.AddHighlightedEntity(entities[i], readings[i], i, entities.Length, caption, actionForRow);
-                    else card.Add(entities[i], readings[i], caption, actionForRow);
+                            hideName, dense && string.IsNullOrWhiteSpace(fontSize) ? "Small" : fontSize, icon);
+                    else if (highlighted)
+                        card.AddHighlightedEntity(entities[i], readings[i], i, entities.Length, caption, actionForRow, icon);
+                    else card.Add(entities[i], readings[i], caption, actionForRow, icon);
                 }
+                if (twoColumns && entities.Length != 0)
+                    card.ArrangeColumns(rowStart, columnSplit < 0 ? card.RowCount : columnSplit, text.ShowColumnDivider);
                 if (hasControl && (entities.Length == 0 || definition == SwitchesDefinition))
                     card.AddControl(control, await controlTask, text.ActionCaption);
             }
@@ -244,7 +277,7 @@ sealed class WidgetProvider : IWidgetProvider, IWidgetProvider2
     static bool IsSolar(string definition) => definition is SolarDefinition or SolarIconsDefinition;
 
     static bool IsHomeAssistant(string definition) =>
-        definition is HomeAssistantDefinition or SwitchesDefinition or SensorsDefinition;
+        definition is HomeAssistantDefinition or SwitchesDefinition or SensorsDefinition or TwoColumnsDefinition;
 
     static bool IsControl(string entity) => BoardSelection.IsSwitch(entity) || BoardSelection.IsButton(entity);
 

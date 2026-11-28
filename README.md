@@ -137,3 +137,9 @@ Zum Paketieren werden das Windows SDK mit MakeAppx und das .NET 8 SDK benötigt.
     powershell -NoProfile -File Store\Build-Msix.ps1 -IdentityName "PAKETNAME" -Publisher "CN=HERAUSGEBER-ID" -PublisherDisplayName "HERAUSGEBERNAME"
 
 Das Paket liegt anschließend im Ordner `artifacts`. Ohne `-Architecture` wird für x64 gebaut. Für ARM64 bzw. 32-Bit-Windows `-Architecture arm64` bzw. `-Architecture x86` angeben. Die MSIX-Version für ein Store-Update lässt sich über `-PackageVersion` setzen. Für eine lokale Installation wird ein vertrauenswürdig signiertes MSIX oder eine registrierte Entwicklerinstallation benötigt.
+
+## Windows Widgets · Version 1.1.0 Build 2811.4
+
+![Windows Widgets Board mit Solarkachel, Sensoren und zwei Spalten](docs/screenshots/2811.4/windows-widgets-2811.4.png)
+
+[Solarkachel](docs/screenshots/2811.4/solar-settings-2811.4.png) · [Zwei Spalten](docs/screenshots/2811.4/two-column-settings-2811.4.png) · [Sensoren](docs/screenshots/2811.4/sensor-settings-2811.4.png) · [Versionshinweise DE/EN](docs/Store-Neuerungen-2811.4-DE-EN.txt)

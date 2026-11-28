@@ -821,7 +821,7 @@ sealed class Options : Form
         internal SolarTile.Sensor Selection { get { return (SolarTile.Sensor)list.SelectedItem; } }
         internal string SelectedEntity { get { return Selection.entity_id; } }
 
-        internal SensorPicker(SolarTile.Sensor[] sensors, string unit, string current)
+        internal SensorPicker(SolarTile.Sensor[] sensors, string unit, string current, bool allowClear = false)
         {
             Text = unit == "board_action" ? UiText.Get("Schalter oder Taster auswählen", "Select switch or button")
                 : unit == "board" ? UiText.Get("Entität auswählen", "Select entity") : UiText.Get("Sensor auswählen", "Select sensor");
@@ -865,6 +865,13 @@ sealed class Options : Form
             var cancel = new SettingsButton { Text = UiText.Get("Abbrechen", "Cancel"), Bounds = new Rectangle(420, 369, 110, 28), DialogResult = DialogResult.Cancel };
             StyleButton(accept);
             StyleButton(cancel);
+            if (allowClear && !string.IsNullOrWhiteSpace(current))
+            {
+                var clear = new SettingsButton { Text = UiText.Get("Aktion entfernen", "Remove action"),
+                    Bounds = new Rectangle(12, 369, 140, 28), DialogResult = DialogResult.Abort };
+                StyleButton(clear);
+                Controls.Add(clear);
+            }
             accept.Click += delegate { if (list.SelectedItem != null) DialogResult = DialogResult.OK; };
             list.DoubleClick += delegate { if (list.SelectedItem != null) DialogResult = DialogResult.OK; };
             list.SelectedIndexChanged += delegate { accept.Enabled = list.SelectedIndex >= 0; };

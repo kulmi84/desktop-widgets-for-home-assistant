@@ -13,7 +13,7 @@ using System.Windows.Forms;
 
 sealed class BoardOptions : BoardSettingsWindow
 {
-    internal static string MenuLabel { get { return UiText.Get("Windows-Widgetboard…", "Windows Widgets Board…"); } }
+    internal static string MenuLabel { get { return "Windows Widgets…"; } }
 
     internal static bool IsSupported()
     {
@@ -33,7 +33,7 @@ sealed class BoardOptions : BoardSettingsWindow
     readonly SettingsButton remove;
 
     internal BoardOptions(Settings connection)
-        : base(UiText.Get("Windows-Widgetboard", "Windows Widgets Board"), new Size(640, 360))
+        : base("Windows Widgets", new Size(640, 360))
     {
         this.connection = connection;
         config = new BoardConfiguration();
@@ -57,9 +57,8 @@ sealed class BoardOptions : BoardSettingsWindow
         table = CreateTable(new Rectangle(14, 14, 612, 249));
         table.ReadOnly = true;
         table.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-        table.Columns.Add(TextColumn(UiText.Get("Kachel", "Widget"), 46));
-        table.Columns.Add(TextColumn(UiText.Get("Typ", "Type"), 29));
-        table.Columns.Add(TextColumn(UiText.Get("Darstellung", "Layout"), 25));
+        table.Columns.Add(TextColumn(UiText.Get("Kachel", "Widget"), 65));
+        table.Columns.Add(TextColumn(UiText.Get("Typ", "Type"), 35));
         table.CellDoubleClick += delegate(object sender, DataGridViewCellEventArgs args)
         {
             if (args.RowIndex >= 0) EditSelection();
@@ -77,6 +76,8 @@ sealed class BoardOptions : BoardSettingsWindow
         remove = CreateButton(UiText.Get("Entfernen", "Remove"), 257, 296, 96);
         var cancel = CreateButton(UiText.Get("Abbrechen", "Cancel"), 406, 296, 106);
         var save = CreateButton(UiText.Get("Speichern", "Save"), 520, 296, 106);
+        Controls.Add(new Label { Text = ReleaseVersion.Display, ForeColor = Color.FromArgb(172, 179, 190),
+            AutoSize = true, Location = new Point(14, 331), Anchor = AnchorStyles.Left | AnchorStyles.Bottom });
         save.Primary = true;
         cancel.DialogResult = DialogResult.Cancel;
         CancelButton = cancel;
@@ -114,15 +115,16 @@ sealed class BoardOptions : BoardSettingsWindow
         table.Rows.Clear();
         foreach (var profile in profiles)
         {
-            int index = table.Rows.Add(profile.Name, "Home Assistant", BoardProperties.ProfileLayout(profile.HighlightValues));
+            var widgetText = profile.WidgetText;
+            string title = widgetText != null && widgetText.UseCustomDescription && !widgetText.HideTitle
+                ? widgetText.Description : null;
+            int index = table.Rows.Add(string.IsNullOrWhiteSpace(title) ? profile.Name : title.Trim(), "Home Assistant");
             table.Rows[index].Tag = profile;
         }
-        table.Rows.Add(config.SolarDisplayName(), UiText.Get("Solar-Widget", "Solar widget"),
-            UiText.Get("Live und Heute", "Live and today"));
+        table.Rows.Add(config.SolarDisplayName(), UiText.Get("Solar-Widget", "Solar widget"));
         foreach (var solar in solarProfiles)
         {
-            int index = table.Rows.Add(solar.Name, UiText.Get("Solar-Widget", "Solar widget"),
-                UiText.Get("Live und Heute", "Live and today"));
+            int index = table.Rows.Add(solar.Name, UiText.Get("Solar-Widget", "Solar widget"));
             table.Rows[index].Tag = solar;
         }
         table.CurrentCell = table.Rows[selected].Cells[0];
@@ -184,10 +186,17 @@ sealed class BoardProperties : BoardSettingsWindow
     readonly Settings connection;
     readonly DataGridViewRow[] entities;
     DataGridViewRow name;
-    DataGridViewRow layout;
-    DataGridViewRow description, statusCaption, actionEntity, actionCaption;
+    readonly bool[] sizeHighlights;
+    readonly ComboBox previewLayout = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
+    readonly Label previewLayoutLabel = new Label();
+    DataGridViewRow description;
+    readonly string legacyAction, legacyActionCaption;
     DataGridViewRow compactTitle;
-    DataGridViewRow[] compactModes, compactCaptions, compactSizes, compactIcons;
+    DataGridViewRow[] compactModes, compactNames, compactSizes, compactIcons, rowActions, columnRows;
+    readonly string[] columnNames = { UiText.Get("Automatisch", "Automatic"), UiText.Get("Links", "Left"), UiText.Get("Rechts", "Right") };
+    int expandedRow = -1;
+    SettingsButton backFromAppearance;
+    readonly Dictionary<string, string> previewNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     readonly string[] iconNames = { UiText.Get("Automatisch", "Automatic"), UiText.Get("Garagentor", "Garage door"),
         UiText.Get("Tür", "Door"), UiText.Get("Fenster", "Window"), UiText.Get("Akku", "Battery"),
         UiText.Get("Solar", "Solar"), UiText.Get("LED-Streifen", "LED strip"), UiText.Get("Glühlampe", "Light bulb"),
@@ -198,19 +207,28 @@ sealed class BoardProperties : BoardSettingsWindow
         UiText.Get("Klein", "Small"), UiText.Get("Groß", "Large") };
     readonly string[] fontValues = { "", "Default", "Small", "Large" };
     readonly Panel preview = new Panel();
+    readonly ComboBox previewType = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
     readonly ComboBox previewSize = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
-    readonly RectangleF[] previewRows = new RectangleF[BoardSelection.Capacity];
+    readonly RectangleF[] previewRows = new RectangleF[BoardSelection.TwoColumnCapacity];
+    int draggedSlot = -1;
+    Point dragStart;
+    bool suppressPreviewClick;
     readonly string compactIconStatus = UiText.Get("Nur Icon und Status", "Icon and status only");
     readonly Label sectionHint = new Label();
-    readonly List<SettingsButton> sections = new List<SettingsButton>();
-    readonly List<DataGridViewRow[]> sectionRows = new List<DataGridViewRow[]>();
-    readonly List<string> sectionHints = new List<string>();
+    readonly Panel overview = new Panel();
+    readonly TableLayoutPanel widgetSettings = new TableLayoutPanel();
+    Label smallTitleLabel;
+    Control smallTitleInput;
+    readonly CheckBox columnDivider = new CheckBox();
+    readonly SettingsButton[] actionButtons = new SettingsButton[BoardSelection.TwoColumnCapacity];
+    readonly ToolTip overviewTips = new ToolTip();
+    int selectedSlot = -1;
     bool browsing;
 
     internal BoardProperties(Settings connection, BoardProfile profile)
         : base(UiText.Get("Eigenschaften", "Properties") + " – " +
             profile.Name,
-            new Size(1150, 456))
+            new Size(1150, 584))
     {
         this.connection = connection;
         this.profile = profile;
@@ -225,11 +243,13 @@ sealed class BoardProperties : BoardSettingsWindow
         table.Columns.Add(TextColumn(UiText.Get("Einstellung", "Setting"), 51));
         table.Columns.Add(new DataGridViewTextBoxColumn
         {
-            HeaderText = UiText.Get("Aktion", "Action"), Width = 104, ReadOnly = true,
+            HeaderText = UiText.Get("Sensor", "Sensor"), Width = 96, ReadOnly = true,
             AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
             SortMode = DataGridViewColumnSortMode.NotSortable
         });
         table.Columns[0].ReadOnly = table.Columns[1].ReadOnly = true;
+        table.Columns.Add(TextColumn(UiText.Get("Beschriftung", "Label"), 25));
+        table.Columns[4].DisplayIndex = 3;
         table.EditMode = DataGridViewEditMode.EditOnEnter;
         table.StandardTab = false;
         table.EditingControlShowing += delegate(object sender, DataGridViewEditingControlShowingEventArgs args)
@@ -237,77 +257,116 @@ sealed class BoardProperties : BoardSettingsWindow
             args.Control.BackColor = SettingsTheme.MonitorInput;
             args.Control.ForeColor = Color.WhiteSmoke;
         };
-        table.CellContentClick += Browse;
         table.DataError += delegate(object sender, DataGridViewDataErrorEventArgs args) { args.ThrowException = false; };
         Controls.Add(table);
 
-        name = AddRow(UiText.Get("Kachel", "Widget"), UiText.Get("Profilname in der Liste", "Profile name in the list"), profile.Name);
-        name.Cells[2].ReadOnly = profile.Id.Length == 0;
-        layout = AddRow(UiText.Get("Kachel", "Widget"), UiText.Get("Darstellung", "Layout"),
-            ProfileLayout(profile.HighlightValues), new[] { ProfileLayout(false), ProfileLayout(true) });
         var text = profile.WidgetText ?? new BoardWidgetText();
-        description = AddRow(UiText.Get("Kachel", "Widget"), UiText.Get("Optionale Textzeile", "Optional text line"),
-            text.UseCustomDescription ? text.Description : profile.Id.Length != 0 ? profile.Name : "");
-        entities = new DataGridViewRow[BoardSelection.Capacity];
+        columnDivider.Checked = text.ShowColumnDivider;
+        string oldAction = text.ActionEntity ?? "";
+        var oldEntities = profile.Entities ?? new string[0];
+        int legacySlot = oldAction.Length == 0 ? -1 : Array.FindIndex(oldEntities, id =>
+            !string.IsNullOrEmpty(id) && id != oldAction && id.StartsWith("binary_sensor.", StringComparison.Ordinal) &&
+            (BoardSelection.ContactIconFromId(oldAction) != "garage" || BoardSelection.ContactIconFromId(id) == "garage"));
+        legacyAction = legacySlot < 0 ? oldAction : "";
+        legacyActionCaption = legacySlot < 0 ? text.ActionCaption : "";
+        entities = new DataGridViewRow[BoardSelection.TwoColumnCapacity];
+        int firstSensor = Array.FindIndex(oldEntities, id => !string.IsNullOrWhiteSpace(id) && id != oldAction);
         for (int i = 0; i < entities.Length; i++)
+        {
             entities[i] = AddRow(UiText.Get("Anzeige", "Display"), UiText.Get("Messwert / Status ", "Reading / status ") + (i + 1),
                 (profile.Entities ?? new string[0]).ElementAtOrDefault(i), browse: true);
-        statusCaption = AddRow(UiText.Get("Anzeige", "Display"), UiText.Get("Beschriftung für Status 1", "Label for status 1"),
-            text.StatusCaption);
-        compactTitle = AddRow(UiText.Get("Kleine Kachel", "Small widget"), UiText.Get("Eigener Titel", "Custom title"),
-            text.CompactTitle);
-        compactModes = new DataGridViewRow[BoardSelection.SmallCapacity];
-        compactCaptions = new DataGridViewRow[BoardSelection.SmallCapacity];
-        compactSizes = new DataGridViewRow[BoardSelection.SmallCapacity];
-        compactIcons = new DataGridViewRow[BoardSelection.SmallCapacity];
+            var caption = (DataGridViewTextBoxCell)entities[i].Cells[4];
+            caption.ReadOnly = false;
+            caption.MaxInputLength = 40;
+            caption.Value = (text.CompactCaptions ?? new string[0]).ElementAtOrDefault(i);
+            if (i == firstSensor && string.IsNullOrWhiteSpace(Convert.ToString(caption.Value)))
+                caption.Value = text.StatusCaption;
+        }
+        compactModes = new DataGridViewRow[BoardSelection.TwoColumnCapacity];
+        compactNames = new DataGridViewRow[BoardSelection.TwoColumnCapacity];
+        compactSizes = new DataGridViewRow[BoardSelection.TwoColumnCapacity];
+        compactIcons = new DataGridViewRow[BoardSelection.TwoColumnCapacity];
+        rowActions = new DataGridViewRow[BoardSelection.TwoColumnCapacity];
+        columnRows = new DataGridViewRow[BoardSelection.TwoColumnCapacity];
         string compactFull = UiText.Get("Icon, Name und Status", "Icon, name and status");
         for (int i = 0; i < compactModes.Length; i++)
         {
-            string rowLabel = UiText.Get("Zeile ", "Row ") + (i + 1);
+            string rowLabel = UiText.Get("Sensorzeile ", "Sensor row ") + (i + 1);
             compactModes[i] = AddRow(rowLabel, UiText.Get("Inhalt", "Content"),
                 (text.CompactHideNames ?? new bool[0]).ElementAtOrDefault(i) ? compactIconStatus : compactFull,
                 new[] { compactFull, compactIconStatus });
-            compactCaptions[i] = AddRow(rowLabel, UiText.Get("Beschriftung", "Label"),
-                (text.CompactCaptions ?? new string[0]).ElementAtOrDefault(i));
+            compactNames[i] = AddRow(rowLabel, UiText.Get("Beschriftung", "Label"), "");
             int font = Array.IndexOf(fontValues, (text.CompactSizes ?? new string[0]).ElementAtOrDefault(i));
             compactSizes[i] = AddRow(rowLabel, UiText.Get("Schriftgröße", "Font size"),
                 fontSizes[Math.Max(0, font)], fontSizes);
             int icon = Array.IndexOf(iconValues, (text.CompactIcons ?? new string[0]).ElementAtOrDefault(i));
             compactIcons[i] = AddRow(rowLabel, UiText.Get("Symbol", "Icon"), iconNames[Math.Max(0, icon)], iconNames);
+            int placement = (text.Columns ?? new int[0]).ElementAtOrDefault(i);
+            columnRows[i] = AddRow(rowLabel, UiText.Get("Spalte (Zwei Spalten)", "Column (Two columns)"),
+                columnNames[Math.Max(0, Math.Min(2, placement))], columnNames);
+            string rowAction = (text.RowActions ?? new string[0]).ElementAtOrDefault(i);
+            rowActions[i] = AddRow(rowLabel, UiText.Get("Schalter oder Taster beim Klick", "Switch or button on click"),
+                string.IsNullOrWhiteSpace(rowAction) && i == legacySlot ? oldAction : rowAction);
         }
-        actionEntity = AddRow(UiText.Get("Bedienung", "Control"), UiText.Get("Schalter oder Taster", "Switch or button"),
-            text.ActionEntity, browse: true);
-        actionCaption = AddRow(UiText.Get("Bedienung", "Control"), UiText.Get("Name der Aktion", "Action name"),
-            text.ActionCaption);
-        AddSection(UiText.Get("Sensoren", "Sensors"), entities,
-            UiText.Get("Wähle die Sensoren in Anzeigereihenfolge. Klein zeigt bis zu 3, Mittel bis zu 6, Groß bis zu 8.",
-                "Choose sensors in display order. Small shows up to 3, medium up to 6, and large up to 8."));
-        AddSection(UiText.Get("Darstellung", "Appearance"), new[] { name, layout, description, statusCaption },
-            UiText.Get("Der Profilname dient zur Auswahl. Die optionale Textzeile erscheint in der Kachel, sofern das Layout sie zeigt.",
-                "The profile name is used in the picker. The optional text line appears when the layout shows it."));
-        AddSection(UiText.Get("Kleine Kachel", "Small widget"), new[] { compactTitle }.Concat(
-            Enumerable.Range(0, compactModes.Length).SelectMany(i => new[] { compactModes[i], compactCaptions[i], compactSizes[i], compactIcons[i] })).ToArray(),
-            UiText.Get("Der eigene Titel steht in der Kachel. Die Zeilennummern entsprechen der Sensorauswahl.",
-                "The custom title appears inside the widget. Row numbers match the sensor selection."));
-        AddSection(UiText.Get("Bedienung", "Control"), new[] { actionEntity, actionCaption },
-            UiText.Get("Der Schalter oder Taster wird über die zugehörige Statuszeile betätigt.",
-                "Click the corresponding status row to use the switch or button."));
-        ShowSection(0);
+        name = AddRow(UiText.Get("Kachel", "Widget"), UiText.Get("Kachelname", "Widget name"), profile.Name);
+        name.Cells[2].ReadOnly = profile.Id.Length == 0;
+        sizeHighlights = Enumerable.Range(0, 4).Select(index =>
+            text.HighlightFor(index, index != 3 && profile.HighlightValues)).ToArray();
+        description = AddRow(UiText.Get("Kachel", "Widget"), UiText.Get("Inhaltstitel (optional)", "Content title (optional)"),
+            text.HideTitle ? "" : text.UseCustomDescription ? text.Description : profile.Id.Length != 0 ? profile.Name : "");
+        compactTitle = AddRow(UiText.Get("Kleine Kachel", "Small widget"), UiText.Get("Titel für Klein", "Title for Small"),
+            text.HideTitle ? "" : text.CompactTitle);
+        CreateOverview();
+        ShowOverview();
         var previewHeading = new Label { Text = UiText.Get("Vorschau · Beispielwerte", "Preview · sample values"),
-            Bounds = new Rectangle(822, 54, 192, 23), Anchor = AnchorStyles.Top | AnchorStyles.Right };
+            Bounds = new Rectangle(822, 18, 314, 23), Anchor = AnchorStyles.Top | AnchorStyles.Right };
+        previewType.AccessibleName = UiText.Get("Widgettyp für die Vorschau", "Widget type for preview");
+        previewType.ForeColor = Color.WhiteSmoke;
+        previewType.Bounds = new Rectangle(822, 50, 188, 26);
+        previewType.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        previewType.Items.AddRange(new[] { UiText.Get("Schalter und Sensoren", "Switches and sensors"),
+            UiText.Get("Schalter", "Switches"), UiText.Get("Sensoren", "Sensors"), UiText.Get("Zwei Spalten", "Two columns") });
+        previewType.SelectedIndex = Math.Max(0, Math.Min(3, text.PreferredWidgetType));
         previewSize.AccessibleName = UiText.Get("Vorschaugröße", "Preview size");
         previewSize.ForeColor = Color.WhiteSmoke;
         previewSize.Bounds = new Rectangle(1018, 50, 118, 26);
         previewSize.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         previewSize.Items.AddRange(new[] { UiText.Get("Klein", "Small"), UiText.Get("Mittel", "Medium"), UiText.Get("Groß", "Large") });
-        previewSize.SelectedIndex = 0;
+        previewSize.SelectedIndex = previewType.SelectedIndex == 3 ? 1 : Math.Max(0, Math.Min(2, text.PreferredWidgetSize));
+        previewSize.Enabled = previewType.SelectedIndex != 3;
+        UpdateOverviewHint();
         preview.Bounds = new Rectangle(822, 89, 314, 310);
         preview.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         preview.AccessibleName = previewHeading.Text;
         preview.Paint += PaintWidgetPreview;
         preview.MouseClick += SelectPreviewRow;
-        previewSize.SelectedIndexChanged += RefreshWidgetPreview;
+        preview.MouseDown += BeginPreviewDrag;
+        preview.MouseUp += EndPreviewDrag;
+        previewLayoutLabel.Text = UiText.Get("Darstellung", "Layout");
+        previewLayoutLabel.Anchor = previewLayout.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        previewLayout.AccessibleName = previewLayoutLabel.Text;
+        previewLayout.ForeColor = Color.WhiteSmoke;
+        previewLayout.Items.AddRange(new[] { ProfileLayout(false), ProfileLayout(true) });
+        previewLayout.SelectionChangeCommitted += delegate
+        {
+            sizeHighlights[PreviewLayoutIndex] = previewLayout.SelectedIndex == 1;
+            preview.Invalidate();
+        };
+        previewSize.SelectedIndexChanged += delegate { UpdatePreviewLayout(); };
+        previewType.SelectedIndexChanged += delegate
+        {
+            bool twoColumns = previewType.SelectedIndex == 3;
+            if (twoColumns) previewSize.SelectedIndex = 1;
+            previewSize.Enabled = !twoColumns;
+            if (expandedRow < 0) UpdateOverviewHint();
+            UpdatePreviewLayout();
+        };
         table.CellValueChanged += RefreshWidgetPreview;
+        table.CellValueChanged += delegate(object sender, DataGridViewCellEventArgs args)
+        {
+            if (expandedRow < 0 || args.ColumnIndex != 2 || args.RowIndex != compactNames[expandedRow].Index) return;
+            entities[expandedRow].Cells[4].Value = compactNames[expandedRow].Cells[2].Value;
+        };
         table.SelectionChanged += RefreshWidgetPreview;
         table.CurrentCellDirtyStateChanged += delegate
         {
@@ -319,11 +378,20 @@ sealed class BoardProperties : BoardSettingsWindow
             args.Control.TextChanged -= RefreshWidgetPreview;
             args.Control.TextChanged += RefreshWidgetPreview;
         };
-        Controls.AddRange(new Control[] { previewHeading, previewSize, preview });
+        Controls.AddRange(new Control[] { previewHeading, previewType, previewSize, preview, previewLayoutLabel, previewLayout });
+        previewLayoutLabel.BringToFront();
+        previewLayout.BringToFront();
+        widgetSettings.BringToFront();
+        UpdatePreviewLayout();
 
-        int footer = ClientSize.Height - 40;
+        int footer = ClientSize.Height - 48;
+        backFromAppearance = CreateButton(UiText.Get("Zurück", "Back"), 14, footer, 90);
+        backFromAppearance.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
+        backFromAppearance.Visible = false;
+        backFromAppearance.Click += delegate { ShowRowAppearance(-1); };
         var cancel = CreateButton(UiText.Get("Abbrechen", "Cancel"), 916, footer, 106);
         var apply = CreateButton(UiText.Get("Übernehmen", "Apply"), 1030, footer, 106);
+        backFromAppearance.Height = cancel.Height = apply.Height = 32;
         cancel.Anchor = apply.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
         cancel.DialogResult = DialogResult.Cancel;
         apply.Primary = true;
@@ -332,32 +400,156 @@ sealed class BoardProperties : BoardSettingsWindow
         SettingsTheme.ApplyMonitorStyle(this);
     }
 
-    void AddSection(string label, DataGridViewRow[] rows, string hint)
+    void CreateOverview()
     {
-        int index = sections.Count;
-        var button = CreateButton(label, 14 + 158 * index, 14, 150);
-        button.Click += delegate { ShowSection(index); };
-        sections.Add(button);
-        sectionRows.Add(rows);
-        sectionHints.Add(hint);
+        overview.Bounds = table.Bounds;
+        overview.Anchor = table.Anchor;
+        overview.AutoScroll = false;
+        Disposed += delegate { overviewTips.Dispose(); };
+        var list = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 6, RowCount = entities.Length + 1 };
+        list.RowStyles.Add(new RowStyle(SizeType.Absolute, 20));
+        for (int i = 0; i < entities.Length; i++) list.RowStyles.Add(new RowStyle(SizeType.Percent, 100f / entities.Length));
+        list.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 28));
+        list.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62));
+        list.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
+        for (int i = 0; i < 3; i++) list.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 37));
+        list.Controls.Add(new Label { Text = UiText.Get("Sensor-ID", "Sensor ID"), AutoSize = true }, 1, 0);
+        list.Controls.Add(new Label { Text = UiText.Get("Beschriftung", "Label"), AutoSize = true }, 2, 0);
+        for (int i = 0; i < entities.Length; i++)
+        {
+            int slot = i;
+            int row = i + 1;
+            list.Controls.Add(new Label { Text = row.ToString(), Anchor = AnchorStyles.Left, AutoSize = true }, 0, row);
+            list.Controls.Add(OverviewInput(entities[i], 2, UiText.Get("Sensor-ID", "Sensor ID") + " " + row, 255), 1, row);
+            list.Controls.Add(OverviewInput(entities[i], 4, UiText.Get("Beschriftung", "Label") + " " + row, 40), 2, row);
+            list.Controls.Add(OverviewButton("\uE721", UiText.Get("Sensor auswählen", "Select sensor"),
+                delegate { Browse(slot, false); }), 3, row);
+            actionButtons[i] = OverviewButton("\uE71B", "", delegate { Browse(slot, true); });
+            list.Controls.Add(actionButtons[i], 4, row);
+            UpdateActionButton(i);
+            list.Controls.Add(OverviewButton("\uE713", UiText.Get("Darstellung", "Appearance"),
+                delegate { ShowRowAppearance(slot); }), 5, row);
+        }
+        widgetSettings.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        widgetSettings.ColumnCount = 2;
+        widgetSettings.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 132));
+        widgetSettings.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        var settings = new[] { name, description, compactTitle };
+        widgetSettings.RowCount = settings.Length + 1;
+        for (int row = 0; row < settings.Length; row++)
+        {
+            var setting = settings[row];
+            var label = new Label { Text = Value(setting, 1), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
+            var field = OverviewInput(setting, 2, label.Text, 40);
+            widgetSettings.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+            widgetSettings.Controls.Add(label, 0, row);
+            widgetSettings.Controls.Add(field, 1, row);
+            if (setting == compactTitle)
+            {
+                smallTitleLabel = label;
+                smallTitleInput = field;
+            }
+        }
+        columnDivider.Text = UiText.Get("Trennlinie anzeigen", "Show divider");
+        columnDivider.Dock = DockStyle.Fill;
+        columnDivider.CheckedChanged += RefreshWidgetPreview;
+        widgetSettings.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+        widgetSettings.Controls.Add(columnDivider, 0, 3);
+        widgetSettings.SetColumnSpan(columnDivider, 2);
+        overview.Controls.Add(list);
+        Controls.Add(overview);
+        Controls.Add(widgetSettings);
     }
 
-    void ShowSection(int index)
+    TextBox OverviewInput(DataGridViewRow row, int column, string label, int limit)
+    {
+        var cell = row.Cells[column];
+        var input = new TextBox { Dock = DockStyle.Fill, AccessibleName = label, MaxLength = limit,
+            ForeColor = Color.WhiteSmoke, ReadOnly = cell.ReadOnly, Text = Value(row, column) };
+        input.TextChanged += delegate { if (input.Text != Convert.ToString(cell.Value)) cell.Value = input.Text; };
+        input.Enter += delegate { selectedSlot = Array.IndexOf(entities, row); preview.Invalidate(); };
+        table.CellValueChanged += delegate(object sender, DataGridViewCellEventArgs args)
+        {
+            if (args.RowIndex == row.Index && args.ColumnIndex == column && input.Text != Convert.ToString(cell.Value))
+                input.Text = Convert.ToString(cell.Value);
+        };
+        return input;
+    }
+
+    SettingsButton OverviewButton(string icon, string label, EventHandler clicked)
+    {
+        var button = new SettingsButton { Text = icon, AccessibleName = label, ForeColor = Color.WhiteSmoke,
+            Font = new Font("Segoe MDL2 Assets", 11), Size = new Size(32, 25) };
+        button.Click += clicked;
+        overviewTips.SetToolTip(button, label);
+        return button;
+    }
+
+    int PreviewLayoutIndex { get { return previewType.SelectedIndex == 3 ? 3 : previewSize.SelectedIndex; } }
+
+    void UpdatePreviewLayout()
+    {
+        int top = preview.Top + (previewSize.SelectedIndex == 0 ? 154 : 308) + 9;
+        previewLayoutLabel.Bounds = new Rectangle(preview.Left, top + 4, 108, 23);
+        previewLayout.Bounds = new Rectangle(preview.Left + 112, top, preview.Width - 112, 26);
+        widgetSettings.Bounds = new Rectangle(preview.Left, top + 29, preview.Width, 94);
+        bool small = previewSize.SelectedIndex == 0;
+        bool twoColumns = previewType.SelectedIndex == 3;
+        smallTitleLabel.Visible = smallTitleInput.Visible = small;
+        columnDivider.Visible = twoColumns;
+        widgetSettings.RowStyles[2].Height = small ? 30 : 0;
+        widgetSettings.RowStyles[3].Height = twoColumns ? 30 : 0;
+        previewLayout.SelectedIndex = sizeHighlights[PreviewLayoutIndex] ? 1 : 0;
+        preview.Invalidate();
+    }
+
+    void UpdateOverviewHint()
+    {
+        sectionHint.Text = previewType.SelectedIndex == 3
+            ? UiText.Get("Sensorzeilen in der Vorschau ziehen, um Reihenfolge und Spalte zu ändern.",
+                "Drag sensor rows in the preview to change their order and column.")
+            : UiText.Get("Sensor auswählen, Klickaktion zuweisen oder Darstellung öffnen.",
+                "Select a sensor, assign a click action or open appearance settings.");
+    }
+
+    void ShowOverview()
+    {
+        table.CurrentCell = null;
+        table.Visible = false;
+        overview.Visible = true;
+        UpdateOverviewHint();
+    }
+
+    void ShowRowAppearance(int slot)
     {
         if (!table.EndEdit()) return;
-        if (index == 2) previewSize.SelectedIndex = 0;
-        table.CurrentCell = null;
-        var rows = sectionRows[index];
-        foreach (DataGridViewRow row in table.Rows) row.Visible = rows.Contains(row);
-        table.Columns[3].Visible = rows.Any(row => row.Cells[3] is DataGridViewButtonCell);
-        table.CurrentCell = rows[0].Cells[1];
-        sectionHint.Text = sectionHints[index];
-        for (int i = 0; i < sections.Count; i++)
+        bool detail = slot >= 0;
+        int previous = expandedRow;
+        SuspendLayout();
+        expandedRow = slot;
+        overview.Visible = !detail;
+        table.Visible = detail;
+        widgetSettings.Visible = !detail;
+        backFromAppearance.Visible = detail;
+        if (detail)
         {
-            sections[i].Primary = i == index;
-            sections[i].ForeColor = i == index ? Color.FromArgb(156, 209, 253) : Color.WhiteSmoke;
-            sections[i].Invalidate();
+            sectionHint.Text = UiText.Get("Darstellung · Sensorzeile ", "Appearance · Sensor row ") + (slot + 1);
+            table.CurrentCell = null;
+            compactNames[slot].Cells[2].Value = entities[slot].Cells[4].Value;
+            foreach (DataGridViewRow row in table.Rows)
+                row.Visible = row == compactModes[slot] || row == compactNames[slot] ||
+                    row == compactSizes[slot] || row == compactIcons[slot] || row == columnRows[slot];
+            table.Columns[3].Visible = table.Columns[4].Visible = false;
+            table.CurrentCell = compactModes[slot].Cells[1];
         }
+        else
+        {
+            ShowOverview();
+            if (previous >= 0) actionButtons[previous].Focus();
+        }
+        ResumeLayout();
+        if (detail) table.Focus();
+        preview.Invalidate();
     }
 
     protected override void OnShown(EventArgs args)
@@ -369,26 +561,96 @@ sealed class BoardProperties : BoardSettingsWindow
             Width = work.Width - 20;
             Left = work.Left + 10;
         }
+        LoadPreviewNames();
+    }
+
+    async void LoadPreviewNames()
+    {
+        if (connection == null) return;
+        try
+        {
+            var sensors = await Options.LoadSensors(new Uri(connection.Url), connection.ReadToken());
+            if (IsDisposed) return;
+            foreach (var sensor in sensors)
+                if (!string.IsNullOrWhiteSpace(sensor.entity_id) && sensor.attributes != null &&
+                    !string.IsNullOrWhiteSpace(sensor.attributes.friendly_name))
+                    previewNames[sensor.entity_id] = sensor.attributes.friendly_name;
+            preview.Invalidate();
+        }
+        catch (Exception)
+        {
+            // The preview can still use labels and sample values while Home Assistant is offline.
+        }
     }
 
     void RefreshWidgetPreview(object sender, EventArgs args) { preview.Invalidate(); }
 
-    string Draft(DataGridViewRow row)
+    string Draft(DataGridViewRow row, int column = 2)
     {
-        return table.CurrentCell != null && table.CurrentCell.OwningRow == row && table.CurrentCell.ColumnIndex == 2 &&
-            table.IsCurrentCellInEditMode && table.EditingControl != null ? table.EditingControl.Text.Trim() : Value(row);
+        return table.CurrentCell != null && table.CurrentCell.OwningRow == row && table.CurrentCell.ColumnIndex == column &&
+            table.IsCurrentCellInEditMode && table.EditingControl != null ? table.EditingControl.Text.Trim() : Value(row, column);
     }
 
     void SelectPreviewRow(object sender, MouseEventArgs args)
     {
-        if (args.Button != MouseButtons.Left || !table.EndEdit()) return;
+        if (suppressPreviewClick) return;
+        if (expandedRow >= 0 || args.Button != MouseButtons.Left || !table.EndEdit()) return;
         float x = args.X * 314f / preview.Width, y = args.Y * 310f / preview.Height;
         int slot = Array.FindIndex(previewRows, row => row.Contains(x, y));
         if (slot < 0) return;
-        int section = previewSize.SelectedIndex == 0 && slot < compactModes.Length ? 2 : 0;
-        ShowSection(section);
-        table.CurrentCell = (section == 2 ? compactModes[slot] : entities[slot]).Cells[2];
-        table.Focus();
+        selectedSlot = slot;
+        actionButtons[slot].Focus();
+        preview.Invalidate();
+    }
+
+    PointF PreviewPoint(Point point)
+    {
+        return new PointF(point.X * 314f / preview.Width, point.Y * 310f / preview.Height);
+    }
+
+    void BeginPreviewDrag(object sender, MouseEventArgs args)
+    {
+        suppressPreviewClick = false;
+        if (previewType.SelectedIndex != 3 || expandedRow >= 0 || args.Button != MouseButtons.Left || !table.EndEdit()) return;
+        var point = PreviewPoint(args.Location);
+        draggedSlot = Array.FindIndex(previewRows, row => row.Contains(point));
+        dragStart = args.Location;
+    }
+
+    void EndPreviewDrag(object sender, MouseEventArgs args)
+    {
+        int source = draggedSlot;
+        draggedSlot = -1;
+        if (source < 0 || (Math.Abs(args.X - dragStart.X) < SystemInformation.DragSize.Width / 2 &&
+            Math.Abs(args.Y - dragStart.Y) < SystemInformation.DragSize.Height / 2)) return;
+        suppressPreviewClick = true;
+        if (!preview.ClientRectangle.Contains(args.Location)) return;
+        var point = PreviewPoint(args.Location);
+        var slots = Enumerable.Range(0, previewRows.Length).Where(i => !previewRows[i].IsEmpty).ToArray();
+        var left = slots.Where(i => i != source && previewRows[i].X < 150).ToList();
+        var right = slots.Where(i => i != source && previewRows[i].X >= 150).ToList();
+        var target = point.X < 157 ? left : right;
+        if (target.Count >= BoardSelection.TwoColumnCapacity / 2) return;
+        int position = target.FindIndex(i => point.Y < previewRows[i].Y + previewRows[i].Height / 2);
+        target.Insert(position < 0 ? target.Count : position, source);
+
+        var order = left.Concat(right).ToArray();
+        var fields = order.Select(i => new[] { Value(entities[i]), Value(entities[i], 4), Value(compactModes[i]),
+            Value(compactSizes[i]), Value(compactIcons[i]), Value(rowActions[i]) }).ToArray();
+        for (int i = 0; i < slots.Length; i++)
+        {
+            int slot = slots[i];
+            entities[slot].Cells[2].Value = fields[i][0];
+            entities[slot].Cells[4].Value = fields[i][1];
+            compactModes[slot].Cells[2].Value = fields[i][2];
+            compactSizes[slot].Cells[2].Value = fields[i][3];
+            compactIcons[slot].Cells[2].Value = fields[i][4];
+            rowActions[slot].Cells[2].Value = fields[i][5];
+            columnRows[slot].Cells[2].Value = columnNames[i < left.Count ? 1 : 2];
+            UpdateActionButton(slot);
+        }
+        selectedSlot = slots[Array.IndexOf(order, source)];
+        preview.Invalidate();
     }
 
     void PaintWidgetPreview(object sender, PaintEventArgs args)
@@ -398,16 +660,23 @@ sealed class BoardProperties : BoardSettingsWindow
         graphics.SmoothingMode = SmoothingMode.AntiAlias;
         graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
         bool small = previewSize.SelectedIndex == 0;
-        bool highlighted = Draft(layout) == ProfileLayout(true);
+        bool highlighted = sizeHighlights[PreviewLayoutIndex];
         int height = small ? 154 : 308;
         using (var outline = SettingsTheme.Rounded(new RectangleF(1, 1, 312, height), 10))
         using (var background = new SolidBrush(Color.FromArgb(48, 48, 48)))
             graphics.FillPath(background, outline);
-        DrawPreviewText(graphics, UiText.Get("Schalter und Sensoren", "Switches and sensors"),
+        DrawPreviewText(graphics, "Home Assistant",
             new RectangleF(14, 10, 280, 22), 14, Color.WhiteSmoke);
         Array.Clear(previewRows, 0, previewRows.Length);
-        var ids = entities.Select(Draft).ToArray();
-        int limit = small ? BoardSelection.SmallCapacity : previewSize.SelectedIndex == 2
+        bool twoColumns = previewType.SelectedIndex == 3;
+        string actionId = previewType.SelectedIndex == 2 ? "" : legacyAction;
+        var ids = entities.Select(row => Draft(row)).Select(id =>
+        {
+            if (!BoardSelection.IsSupported(id) || id == actionId) return "";
+            bool control = BoardSelection.IsSwitch(id) || BoardSelection.IsButton(id);
+            return previewType.SelectedIndex == 1 && !control || previewType.SelectedIndex == 2 && control ? "" : id;
+        }).ToArray();
+        int limit = twoColumns ? BoardSelection.TwoColumnCapacity : small ? BoardSelection.SmallCapacity : previewSize.SelectedIndex == 2
             ? BoardSelection.Capacity : BoardSelection.MediumCapacity;
         bool contacts = ids.Any(IsPreviewContact);
         string title = small ? Draft(compactTitle) : Draft(description);
@@ -418,41 +687,53 @@ sealed class BoardProperties : BoardSettingsWindow
             DrawPreviewText(graphics, title, new RectangleF(14, y, 280, 17), 13, Color.WhiteSmoke, true);
             y += 18;
         }
-        int count = Math.Min(limit, ids.Count(id => id.Length != 0 && id != Draft(actionEntity)));
-        bool dense = !small && count > BoardSelection.SmallCapacity;
+        int count = Math.Min(limit, ids.Count(id => id.Length != 0));
+        bool dense = !twoColumns && !small && count > BoardSelection.SmallCapacity;
+        var right = twoColumns ? BoardWidgetText.RightColumns(Enumerable.Range(0, ids.Length)
+            .Where(i => ids[i].Length != 0).Take(count).ToArray(), columnRows.Select(row =>
+                Math.Max(0, Array.IndexOf(columnNames, Draft(row)))).ToArray()) : new bool[count];
+        float firstRowY = y;
+        var columnY = new[] { y, y };
+        int columnWidth = twoColumns ? 148 : 296;
         int shown = 0;
         for (int i = 0; i < ids.Length; i++)
         {
             string id = ids[i];
-            if (id.Length == 0 || id == Draft(actionEntity)) continue;
+            if (id.Length == 0) continue;
             if (shown++ == count) break;
+            int column = right[shown - 1] ? 1 : 0;
+            int columnX = column * 148;
+            y = columnY[column];
             bool contact = IsPreviewContact(id);
-            bool hasCompactSettings = small && i < compactModes.Length;
-            bool hideName = hasCompactSettings && Draft(compactModes[i]) == compactIconStatus;
-            string caption = hasCompactSettings ? Draft(compactCaptions[i]) : "";
-            if (caption.Length == 0 && i == 0) caption = Draft(statusCaption);
-            if (caption.Length == 0) caption = PreviewEntityName(id);
-            string rowSize = hasCompactSettings ? Draft(compactSizes[i]) : fontSizes[0];
-            string icon = hasCompactSettings ? iconValues[Math.Max(0, Array.IndexOf(iconNames, Draft(compactIcons[i])))] : "";
-            float fontSize = dense || (small && rowSize == fontSizes[2]) ? 12
-                : small && (rowSize == fontSizes[3] || (rowSize == fontSizes[0] && highlighted && contact)) ? 19
+            bool hideName = Draft(compactModes[i]) == compactIconStatus;
+            string customCaption = expandedRow == i ? Draft(compactNames[i]) : Draft(entities[i], 4);
+            string caption = customCaption;
+            if (caption.Length == 0 && !previewNames.TryGetValue(id, out caption)) caption = PreviewEntityName(id);
+            string rowSize = Draft(compactSizes[i]);
+            string icon = iconValues[Math.Max(0, Array.IndexOf(iconNames, Draft(compactIcons[i])))];
+            bool customStyle = hideName || rowSize != fontSizes[0] || (small && icon.Length != 0);
+            float fontSize = rowSize == fontSizes[2] || (dense && rowSize == fontSizes[0] && !highlighted) ? 12
+                : rowSize == fontSizes[0] && highlighted && (dense || twoColumns) ? 18
+                : rowSize == fontSizes[3] || (small && rowSize == fontSizes[0] && highlighted && contact) ? 19
                 : previewSize.SelectedIndex == 2 ? 16 : 14;
-            bool stacked = !dense && (!small || (highlighted && count == 1 && !contact &&
-                !hideName && rowSize == fontSizes[0] && (!hasCompactSettings || Draft(compactCaptions[i]).Length == 0) && icon.Length == 0));
-            float rowHeight = stacked ? (small ? 52 : 63) : fontSize + 9;
-            var row = new RectangleF(9, y, 296, rowHeight);
+            bool stacked = twoColumns || (!dense && !customStyle && (!small ||
+                (highlighted && count == 1 && !contact && customCaption.Length == 0)));
+            bool standardStack = twoColumns || (stacked && !small && !highlighted);
+            float rowHeight = twoColumns ? 36 : stacked ? (standardStack ? 38 : 52) : fontSize + 9;
+            var row = new RectangleF(9 + columnX, y, columnWidth, rowHeight);
             previewRows[i] = row;
             var selected = table.CurrentRow;
-            if (selected == entities[i] || (hasCompactSettings && (selected == compactModes[i] || selected == compactCaptions[i] ||
-                selected == compactSizes[i] || selected == compactIcons[i])))
-                using (var highlight = new SolidBrush(Color.FromArgb(65, 156, 209, 253))) graphics.FillRectangle(highlight, row);
-            Color ink = contact ? Color.FromArgb(143, 243, 216) : Color.FromArgb(132, 216, 242);
+            if (selectedSlot == i && expandedRow < 0 || expandedRow == i || selected == compactModes[i] ||
+                selected == compactSizes[i] || selected == compactIcons[i])
+                using (var highlight = new Pen(Color.FromArgb(125, 156, 209, 253)))
+                    graphics.DrawRectangle(highlight, row.X, row.Y, row.Width, row.Height);
+            Color ink = contact && !standardStack ? Color.FromArgb(143, 243, 216) : Color.FromArgb(132, 216, 242);
             string effectiveIcon = icon.Length == 0 && contact ? BoardSelection.ContactIconFromId(id) : icon;
             if (effectiveIcon.Length == 0 && BoardSelection.IsSwitch(id))
                 effectiveIcon = id.StartsWith("light.", StringComparison.Ordinal) ? "lightbulb" : "toggle-switch-off";
             var state = graphics.Save();
-            float iconSize = small ? (fontSize >= 19 ? 25 : fontSize <= 12 ? 18 : 22) : 22;
-            graphics.TranslateTransform(14, y + (rowHeight - iconSize) / 2);
+            float iconSize = standardStack ? 18 : small ? (fontSize >= 19 ? 25 : fontSize <= 12 ? 18 : 22) : 22;
+            graphics.TranslateTransform(14 + columnX, y + (rowHeight - iconSize) / 2);
             graphics.ScaleTransform(iconSize / 32f, iconSize / 32f);
             if (effectiveIcon == "garage" || effectiveIcon == "door" || effectiveIcon == "window-closed")
                 DoorIcons.Draw(graphics, effectiveIcon == "garage" ? "Garagentor" : effectiveIcon == "door" ? "Tür" : "Fenster", false, ink);
@@ -462,17 +743,21 @@ sealed class BoardProperties : BoardSettingsWindow
             else if (icon != "none") SolarIcon.Draw(graphics, 3, ink);
             graphics.Restore(state);
             string example = PreviewExample(id, contact);
-            float left = icon == "none" ? 15 : 44;
+            float left = icon == "none" ? 15 : standardStack ? 39 : 44;
             float valueX = stacked || hideName ? left : fontSize >= 19 ? 158 : 197;
+            int labelHeight = standardStack ? 16 : 22;
             if (!hideName)
-                DrawPreviewText(graphics, caption, new RectangleF(left, y, stacked ? 294 - left : valueX - left - 4, stacked ? 23 : rowHeight),
-                    fontSize, Color.WhiteSmoke);
-            DrawPreviewText(graphics, example, new RectangleF(valueX, stacked ? y + 22 : y,
-                297 - valueX, stacked ? rowHeight - 22 : rowHeight),
-                stacked && highlighted ? 25 : fontSize, contact ? Color.FromArgb(108, 202, 100) : ink, true,
+                DrawPreviewText(graphics, caption, new RectangleF(left + columnX, y, stacked ? columnWidth - 2 - left : valueX - left - 4, stacked ? labelHeight : rowHeight),
+                    standardStack ? fontSize - 2 : fontSize, Color.WhiteSmoke);
+            DrawPreviewText(graphics, example, new RectangleF(valueX + columnX, stacked && !hideName ? y + labelHeight : y,
+                columnWidth + 1 - valueX, stacked && !hideName ? rowHeight - labelHeight : rowHeight),
+                stacked && highlighted && !twoColumns ? 25 : fontSize, standardStack ? Color.WhiteSmoke : contact ? Color.FromArgb(108, 202, 100) : ink, true,
                 !stacked && !hideName ? StringAlignment.Far : StringAlignment.Near);
-            y += rowHeight + 4;
+            columnY[column] += rowHeight + 4;
         }
+        if (twoColumns && columnDivider.Checked && right.Any(value => value) && right.Any(value => !value))
+            using (var divider = new Pen(Color.Gainsboro))
+                graphics.DrawLine(divider, 155, firstRowY, 155, Math.Max(columnY[0], columnY[1]) - 4);
         if (count == 0)
             DrawPreviewText(graphics, UiText.Get("Wähle einen Sensor aus.", "Choose a sensor."),
                 new RectangleF(14, y, 276, 28), 13, Color.Gainsboro);
@@ -509,6 +794,7 @@ sealed class BoardProperties : BoardSettingsWindow
     DataGridViewRow AddRow(string area, string property, string value, string[] options = null, bool browse = false)
     {
         var row = table.Rows[table.Rows.Add(area, property, value ?? "", "")];
+        row.Cells[4].ReadOnly = true;
         row.Cells[0].Style.ForeColor = Color.Silver;
         row.Cells[2].ToolTipText = value ?? "";
         if (options != null)
@@ -522,16 +808,15 @@ sealed class BoardProperties : BoardSettingsWindow
         {
             ((DataGridViewTextBoxCell)row.Cells[2]).MaxInputLength = browse ? 255 : profile == null ? 32 : 40;
         }
-        if (browse)
-            row.Cells[3] = new DataGridViewButtonCell { Value = UiText.Get("Auswählen…", "Select…"), FlatStyle = FlatStyle.Flat };
         return row;
     }
 
-    async void Browse(object sender, DataGridViewCellEventArgs args)
+    async void Browse(int slot, bool action)
     {
-        if (args.RowIndex < 0 || args.ColumnIndex != 3 || browsing) return;
-        var row = table.Rows[args.RowIndex];
-        if (!(row.Cells[3] is DataGridViewButtonCell)) return;
+        if (browsing) return;
+        selectedSlot = slot;
+        preview.Invalidate();
+        var row = action ? rowActions[slot] : entities[slot];
         if (connection == null)
         {
             MessageBox.Show(this, UiText.Get("Bitte zuerst mit Home Assistant verbinden.",
@@ -544,9 +829,14 @@ sealed class BoardProperties : BoardSettingsWindow
         {
             var sensors = await Options.LoadSensors(new Uri(connection.Url), connection.ReadToken());
             if (IsDisposed) return;
-            string mode = row == actionEntity ? "board_action" : "board";
-            using (var picker = new Options.SensorPicker(sensors, mode, Value(row)))
-                if (picker.ShowDialog(this) == DialogResult.OK) row.Cells[2].Value = picker.SelectedEntity;
+            string mode = action ? "board_action" : "board";
+            using (var picker = new Options.SensorPicker(sensors, mode, Value(row), action))
+            {
+                var result = picker.ShowDialog(this);
+                if (result == DialogResult.OK) row.Cells[2].Value = picker.SelectedEntity;
+                else if (action && result == DialogResult.Abort) row.Cells[2].Value = "";
+                if (action) UpdateActionButton(slot);
+            }
         }
         catch (Exception)
         {
@@ -556,37 +846,60 @@ sealed class BoardProperties : BoardSettingsWindow
         finally { browsing = false; }
     }
 
-    static string Value(DataGridViewRow row)
+    void UpdateActionButton(int slot)
     {
-        return Convert.ToString(row.Cells[2].Value).Trim();
+        string action = Value(rowActions[slot]);
+        var button = actionButtons[slot];
+        button.AccessibleName = action.Length == 0 ? UiText.Get("Aktion hinzufügen", "Add action")
+            : UiText.Get("Aktion ändern…", "Change action…");
+        overviewTips.SetToolTip(button, action.Length == 0 ? button.AccessibleName : button.AccessibleName + " · " + action);
+    }
+
+    static string Value(DataGridViewRow row, int column = 2)
+    {
+        return Convert.ToString(row.Cells[column].Value).Trim();
     }
 
     void Apply(object sender, EventArgs args)
     {
         if (!table.EndEdit()) return;
         var selected = entities.Select(row => Value(row).ToLowerInvariant()).ToArray();
+        var columns = columnRows.Select(row => Math.Max(0, Array.IndexOf(columnNames, Value(row)))).ToArray();
+        if (Enumerable.Range(0, selected.Length).Where(i => selected[i].Length != 0 && columns[i] != 0)
+            .GroupBy(i => columns[i]).Any(group => group.Count() > BoardSelection.TwoColumnCapacity / 2))
+        {
+            MessageBox.Show(this, UiText.Get("Bitte höchstens sechs Einträge pro Spalte fest zuordnen.",
+                "Assign no more than six entries to each column."), Text);
+            return;
+        }
         if (Value(name).Length == 0 || selected.Any(entity => entity.Length != 0 && !BoardSelection.IsSupported(entity)))
         {
-            ShowSection(Value(name).Length == 0 ? 1 : 0);
+            if (expandedRow >= 0) ShowRowAppearance(-1);
+            ShowOverview();
             MessageBox.Show(this, UiText.Get("Bitte einen Namen und gültige Entitäts-IDs eingeben.",
                 "Enter a name and valid entity IDs."), Text);
             return;
         }
-        string control = Value(actionEntity).ToLowerInvariant();
-        if (control.Length != 0 && !BoardSelection.IsSwitch(control) && !BoardSelection.IsButton(control))
+        var actions = rowActions.Select(row => Value(row).ToLowerInvariant()).ToArray();
+        int invalidAction = Array.FindIndex(actions, id => id.Length != 0 && !BoardSelection.IsSwitch(id) && !BoardSelection.IsButton(id));
+        if (invalidAction >= 0)
         {
-            ShowSection(3);
-            MessageBox.Show(this, UiText.Get("Für die Bedienung einen Schalter oder Taster auswählen.",
-                "Select a switch or button for the control."), Text);
+            if (expandedRow >= 0) ShowRowAppearance(-1);
+            ShowOverview();
+            actionButtons[invalidAction].Focus();
+            MessageBox.Show(this, UiText.Get("Bitte einen gültigen Schalter oder Taster auswählen.",
+                "Select a valid switch or button."), Text);
             return;
         }
         profile.Name = Value(name);
-        profile.HighlightValues = Value(layout) == ProfileLayout(true);
+        profile.HighlightValues = sizeHighlights[1];
         profile.Entities = selected;
         profile.WidgetText = new BoardWidgetText { UseCustomDescription = true, Description = Value(description),
-            StatusCaption = Value(statusCaption), ActionEntity = control, ActionCaption = Value(actionCaption),
+            Columns = columns, SizeHighlights = sizeHighlights, ShowColumnDivider = columnDivider.Checked,
+            PreferredWidgetType = previewType.SelectedIndex, PreferredWidgetSize = previewSize.SelectedIndex,
+            ActionEntity = legacyAction, ActionCaption = legacyActionCaption, RowActions = actions,
             CompactTitle = Value(compactTitle), CompactHideNames = compactModes.Select(row => Value(row) == compactIconStatus).ToArray(),
-            CompactCaptions = compactCaptions.Select(Value).ToArray(),
+            CompactCaptions = entities.Select(row => Value(row, 4)).ToArray(),
             CompactSizes = compactSizes.Select(row => fontValues[Math.Max(0, Array.IndexOf(fontSizes, Value(row)))]).ToArray(),
             CompactIcons = compactIcons.Select(row => iconValues[Math.Max(0, Array.IndexOf(iconNames, Value(row)))]).ToArray() };
         DialogResult = DialogResult.OK;

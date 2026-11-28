@@ -8,6 +8,7 @@ static class BoardSelection
     internal const int SmallCapacity = 3;
     internal const int MediumCapacity = 6;
     internal const int Capacity = 8;
+    internal const int TwoColumnCapacity = 12;
     internal const int MaxDecimalPlaces = 6;
     internal static readonly string[] SolarLabels = { "PV + BKW", UiText.Get("Hausverbrauch", "Home consumption"),
         UiText.Get("Akku", "Battery") };
@@ -191,17 +192,41 @@ sealed class BoardWidgetText
         CompactCaptions = new string[0];
         CompactSizes = new string[0];
         CompactIcons = new string[0];
+        RowActions = new string[0];
+        Columns = new int[0];
+        SizeHighlights = new bool[0];
+        PreferredWidgetType = -1;
     }
     public string Description { get; set; }
     public bool UseCustomDescription { get; set; }
     public string StatusCaption { get; set; }
     public string ActionEntity { get; set; }
+    public string[] RowActions { get; set; }
     public string ActionCaption { get; set; }
     public string CompactTitle { get; set; }
     public bool[] CompactHideNames { get; set; }
     public string[] CompactCaptions { get; set; }
     public string[] CompactSizes { get; set; }
     public string[] CompactIcons { get; set; }
+    public int[] Columns { get; set; }
+    public bool HideTitle { get; set; }
+    public bool[] SizeHighlights { get; set; }
+    public bool ShowColumnDivider { get; set; }
+    public int PreferredWidgetType { get; set; }
+    public int PreferredWidgetSize { get; set; }
+
+    internal bool HighlightFor(int index, bool fallback)
+    {
+        return SizeHighlights != null && index >= 0 && index < SizeHighlights.Length ? SizeHighlights[index] : fallback;
+    }
+
+    internal static bool[] RightColumns(int[] slots, int[] columns)
+    {
+        columns = columns ?? new int[0];
+        var placements = slots.Select(slot => columns.ElementAtOrDefault(slot)).ToArray();
+        int automaticLeft = Math.Max(0, (slots.Length + 1) / 2 - placements.Count(column => column == 1));
+        return placements.Select(column => column == 2 || (column == 0 && automaticLeft-- <= 0)).ToArray();
+    }
 }
 
 sealed class SolarBoardProfile : BoardProfile

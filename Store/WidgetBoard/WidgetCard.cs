@@ -27,6 +27,19 @@ sealed class WidgetCard(bool compact = false, bool large = false)
     });
 
     internal string Data => JsonSerializer.Serialize(data);
+    internal int RowCount => body.Count;
+
+    internal void ArrangeColumns(int start, int split, bool separator)
+    {
+        var left = body.GetRange(start, split - start);
+        var right = body.GetRange(split, body.Count - split);
+        body.RemoveRange(start, body.Count - start);
+        body.Add(new { type = "ColumnSet", columns = new[]
+        {
+            new { type = "Column", width = "stretch", items = left, separator = false },
+            new { type = "Column", width = "stretch", items = right, separator = separator && left.Count != 0 && right.Count != 0 }
+        } });
+    }
 
     internal void Message(string message) => body.Add(new { type = "TextBlock", text = Bind(message), wrap = true });
 
@@ -184,7 +197,7 @@ sealed class WidgetCard(bool compact = false, bool large = false)
     }
 
     internal void AddHighlightedEntity(string entity, EntityState? reading, int index, int count, string? caption = null,
-        object? rowAction = null)
+        object? rowAction = null, string? customIcon = null)
     {
         var (name, value, state, contact) = Describe(entity, reading);
         object? action = rowAction ?? EntityAction(entity, state);
@@ -192,7 +205,9 @@ sealed class WidgetCard(bool compact = false, bool large = false)
         int color = contact && state is "on" or "off" ? (state == "on" ? 0 : 2) : index;
         var items = new List<object>();
         AddHighlight(items, string.IsNullOrWhiteSpace(caption) ? name : caption, value, color, index == 0, compact && count > 1, imageWidth: 222);
-        var row = IconRow(items, BoardIcon.ForEntity(entity, reading), color, large ? "Large" : "Small");
+        string icon = string.IsNullOrWhiteSpace(customIcon) ? BoardIcon.ForEntity(entity, reading)
+            : ResolveIcon(entity, reading, state, contact, customIcon);
+        var row = IconRow(items, icon, color, large ? "Large" : "Small");
         if (action != null)
             AddActionRow(row, action);
         else body.Add(row);
@@ -228,18 +243,7 @@ sealed class WidgetCard(bool compact = false, bool large = false)
     {
         var (name, value, state, contact) = Describe(entity, reading);
         int color = contact && state is "on" or "off" ? (state == "on" ? 0 : 2) : 1;
-        string? preferred = string.IsNullOrWhiteSpace(customIcon) && contact &&
-            (IsGarage(entity) || string.IsNullOrWhiteSpace(reading?.Attributes?.DeviceClass))
-            ? BoardSelection.ContactIconFromId(entity) : customIcon;
-        string icon = preferred switch
-        {
-            "garage" or "door" => contact && state == "on" ? preferred + "-open" : preferred,
-            "window-closed" => contact && state == "on" ? "window-open" : preferred,
-            "toggle-switch" => state == "on" ? "toggle-switch" : "toggle-switch-off",
-            "led-strip" or "lightbulb" or "light" => preferred,
-            "battery" or "solar-panel" or "none" => preferred,
-            _ => BoardIcon.ForEntity(entity, reading)
-        };
+        string icon = ResolveIcon(entity, reading, state, contact, customIcon);
         string label = string.IsNullOrWhiteSpace(caption) ? name : caption;
         string size = fontSize is "Small" or "Large" ? fontSize : "Default";
         var columns = new List<object>();
@@ -257,43 +261,63 @@ sealed class WidgetCard(bool compact = false, bool large = false)
         else body.Add(row);
     }
 
+    static string ResolveIcon(string entity, EntityState? reading, string? state, bool contact, string? customIcon)
+    {
+        string? preferred = string.IsNullOrWhiteSpace(customIcon) && contact &&
+            (IsGarage(entity) || string.IsNullOrWhiteSpace(reading?.Attributes?.DeviceClass))
+            ? BoardSelection.ContactIconFromId(entity) : customIcon;
+        return preferred switch
+        {
+            "garage" or "door" => contact && state == "on" ? preferred + "-open" : preferred,
+            "window-closed" => contact && state == "on" ? "window-open" : preferred,
+            "toggle-switch" => state == "on" ? "toggle-switch" : "toggle-switch-off",
+            "led-strip" or "lightbulb" or "light" => preferred,
+            "battery" or "solar-panel" or "none" => preferred,
+            _ => BoardIcon.ForEntity(entity, reading)
+        };
+    }
+
     internal void AddControl(string entity, EntityState? reading, string? label)
     {
         if (EntityAction(entity, reading?.State, label) is { } action)
             body.Add(new { type = "ActionSet", spacing = "Small", actions = new[] { action } });
     }
 
-    internal void Add(string entity, EntityState? reading, string? caption = null, object? rowAction = null)
+    internal void Add(string entity, EntityState? reading, string? caption = null, object? rowAction = null,
+        string? customIcon = null, bool hideName = false, string? fontSize = null, bool narrow = false)
     {
-        var (name, value, state, _) = Describe(entity, reading);
+        var (name, value, state, contact) = Describe(entity, reading);
         if (!string.IsNullOrWhiteSpace(caption)) name = caption;
         object? action = rowAction ?? EntityAction(entity, state);
         if (compact && action != null && BoardSelection.IsButton(entity)) value = UiText.Get("Drücken", "Press");
 
         int color = state == "on" ? 2 : 1;
-        var columns = new List<object>
+        string icon = string.IsNullOrWhiteSpace(customIcon) ? BoardIcon.ForEntity(entity, reading)
+            : ResolveIcon(entity, reading, state, contact, customIcon);
+        var columns = new List<object>();
+        if (icon != "none") columns.Add(IconColumn(icon, color));
+        string nameSize = fontSize is "Small" or "Default" or "Large" ? fontSize : large ? "Default" : "Small";
+        string valueSize = fontSize is "Small" or "Default" or "Large" ? fontSize : large ? "Large" : "Default";
+        columns.Add(new
         {
-            IconColumn(BoardIcon.ForEntity(entity, reading), color),
-            new
-            {
                 type = "Column", width = "stretch", verticalContentAlignment = "Center",
                 items = compact ? new object[]
                 {
                     new { type = "TextBlock", text = Bind(name), size = "Small", maxLines = 1, wrap = true }
                 } : new object[]
                 {
-                    new { type = "TextBlock", text = Bind(name), size = large ? "Default" : "Small", maxLines = 1, wrap = true },
+                    new { type = "TextBlock", text = Bind(name), size = nameSize, maxLines = 1, wrap = true,
+                        isVisible = !hideName },
                     new { type = "TextBlock", text = Bind(value), spacing = "None", weight = "Bolder",
-                        size = large ? "Large" : "Default", maxLines = 1, wrap = true }
+                        size = valueSize, maxLines = 1, wrap = true }
                 }
-            }
-        };
+        });
         if (compact)
             columns.Add(new { type = "Column", width = "auto", verticalContentAlignment = "Center", items = new[]
             {
                 new { type = "TextBlock", text = Bind(value), size = "Small", weight = "Bolder", maxLines = 1, wrap = true }
             } });
-        if (action != null && !compact && rowAction == null)
+        if (action != null && !compact && !narrow && rowAction == null)
         {
             columns.Add(new
             {
@@ -309,21 +333,19 @@ sealed class WidgetCard(bool compact = false, bool large = false)
         }
         var row = new Dictionary<string, object>
         {
-            ["type"] = "ColumnSet", ["spacing"] = large ? "Large" : compact ? "Small" : "Default",
+            ["type"] = "ColumnSet", ["spacing"] = narrow || compact ? "Small" : large ? "Large" : "Default",
             ["columns"] = columns
         };
-        if ((compact || rowAction != null) && action != null) AddActionRow(row, action);
+        if ((compact || narrow || rowAction != null) && action != null) AddActionRow(row, action);
         else body.Add(row);
     }
 
     Dictionary<string, object> IconRow(List<object> items, string icon, int color, string spacing,
         bool alignToValueImage = false) => new()
     {
-        ["type"] = "ColumnSet", ["spacing"] = spacing, ["columns"] = new object[]
-        {
-            IconColumn(icon, color, alignToValueImage),
-            new { type = "Column", width = "stretch", verticalContentAlignment = "Center", items }
-        }
+        ["type"] = "ColumnSet", ["spacing"] = spacing, ["columns"] = (icon == "none" ? Array.Empty<object>()
+            : new[] { IconColumn(icon, color, alignToValueImage) }).Append(
+                new { type = "Column", width = "stretch", verticalContentAlignment = "Center", items }).ToArray()
     };
 
     int IconSize => compact ? 16 : large ? 28 : 22;
