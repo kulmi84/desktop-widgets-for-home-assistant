@@ -1,0 +1,7 @@
+Deutsch (Deutschland)
+Version 1.1.0 · Build 2811.4
+Windows Widgets: Die mittlere Kachel „Zwei Spalten“ zeigt bis zu zwölf Einträge. Sensorzeilen lassen sich in der Vorschau verschieben, individuell beschriften und mit Schaltern oder Tastern verknüpfen. Kachelprofile speichern Widgettyp, Vorschaugröße, Darstellung und die optionale Trennlinie. Die Solarkachel zeigt Live- und Tageswerte.
+
+English (United States)
+Version 1.1.0 · Build 2811.4
+Windows Widgets: The medium Two Columns widget displays up to twelve entries. Drag sensor rows in the preview, give each row a custom label, and link it to a switch or button. Widget profiles remember the widget type, preview size, layout and optional divider. The Solar widget shows live readings and daily totals.

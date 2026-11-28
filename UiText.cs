@@ -4,8 +4,9 @@ using System.IO;
 
 static class UiText
 {
-    static readonly string LanguageFile = Path.Combine(Environment.GetFolderPath(
-        Environment.SpecialFolder.LocalApplicationData), ReleaseVersion.DataFolder, "language.txt");
+    static readonly string LanguageFolder = Path.Combine(Environment.GetFolderPath(
+        Environment.SpecialFolder.LocalApplicationData), ReleaseVersion.DataFolder);
+    static readonly string LanguageFile = Path.Combine(LanguageFolder, "language.txt");
 
     internal static readonly string Preference = ReadPreference();
     internal static readonly bool English = UseEnglish();
@@ -36,7 +37,7 @@ static class UiText
 
     internal static void SavePreference(string value)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(LanguageFile));
+        Directory.CreateDirectory(LanguageFolder);
         File.WriteAllText(LanguageFile, value);
     }
 

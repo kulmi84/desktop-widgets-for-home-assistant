@@ -16,6 +16,27 @@ static class DoorIcons
 
     static readonly GraphicsPath HeatWave = Parse("M8.5 4.5L5.4 9.5L8.5 14.7L5.2 20.5L3.4 19.6L6.1 14.7L3 9.5L6.7 3.6L8.5 4.5M14.7 4.4L11.6 9.5L14.7 14.5L11.4 20.3L9.6 19.4L12.3 14.5L9.2 9.5L12.9 3.5L14.7 4.4M21 4.4L17.9 9.5L21 14.5L17.7 20.3L15.9 19.4L18.6 14.5L15.5 9.5L19.2 3.5L21 4.4");
 
+    static readonly GraphicsPath LedStrip = Parse("M3,7H21A2,2 0 0,1 23,9V15A2,2 0 0,1 21,17H3A2,2 0 0,1 1,15V9A2,2 0 0,1 3,7ZM3,9V15H21V9ZM5,10H8V14H5ZM10.5,10H13.5V14H10.5ZM16,10H19V14H16Z");
+    static readonly GraphicsPath LightBulb = Parse("M9,21A1,1 0 0,0 10,22H14A1,1 0 0,0 15,21V20H9V21M12,2A7,7 0 0,0 5,9C5,11.38 6.19,13.47 8,14.74V17A1,1 0 0,0 9,18H15A1,1 0 0,0 16,17V14.74C17.81,13.47 19,11.38 19,9A7,7 0 0,0 12,2Z");
+    static readonly GraphicsPath Light = Parse("M12,6A6,6 0 1,1 12,18A6,6 0 1,1 12,6ZM11,1H13V4H11ZM11,20H13V23H11ZM1,11H4V13H1ZM20,11H23V13H20ZM3,5L5,3L7,5L5,7ZM17,19L19,17L21,19L19,21ZM17,5L19,3L21,5L19,7ZM3,19L5,17L7,19L5,21Z");
+
+    internal static bool IsControlIcon(string icon)
+    {
+        return icon == "led-strip" || icon == "lightbulb" || icon == "light" ||
+            icon == "toggle-switch" || icon == "toggle-switch-off";
+    }
+
+    internal static void DrawControlIcon(Graphics graphics, string icon, System.Drawing.Color color)
+    {
+        if (icon == "toggle-switch" || icon == "toggle-switch-off")
+        {
+            DrawSwitch(graphics, icon == "toggle-switch", color);
+            return;
+        }
+        using (var brush = new System.Drawing.SolidBrush(color))
+            graphics.FillPath(brush, icon == "led-strip" ? LedStrip : icon == "lightbulb" ? LightBulb : Light);
+    }
+
     internal static void DrawHeatWave(Graphics graphics, System.Drawing.Color color)
     {
         using (var brush = new System.Drawing.SolidBrush(color)) graphics.FillPath(brush, HeatWave);
